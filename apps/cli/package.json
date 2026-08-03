@@ -1,0 +1,27 @@
+{
+  "name": "@megaai/cli",
+  "version": "0.1.0",
+  "description": "MegaAI command line interface",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "megaai": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/sdk": "0.1.0"
+  },
+  "license": "MIT"
+}
