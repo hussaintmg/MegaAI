@@ -1,0 +1,30 @@
+{
+  "name": "@megaai/ai",
+  "version": "0.1.0",
+  "description": "AI layer: provider/model registries, limits, sessions, fallback chains",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0",
+    "@megaai/contracts": "0.1.0",
+    "@megaai/config": "0.1.0",
+    "@megaai/logger": "0.1.0",
+    "@megaai/events": "0.1.0",
+    "@anthropic-ai/sdk": "^0.115.0"
+  },
+  "license": "MIT"
+}

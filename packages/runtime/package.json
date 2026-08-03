@@ -1,0 +1,28 @@
+{
+  "name": "@megaai/runtime",
+  "version": "0.1.0",
+  "description": "Service container: dependency injection, lifecycle, health, metrics, scheduler",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0",
+    "@megaai/config": "0.1.0",
+    "@megaai/logger": "0.1.0",
+    "@megaai/events": "0.1.0"
+  },
+  "license": "MIT"
+}
