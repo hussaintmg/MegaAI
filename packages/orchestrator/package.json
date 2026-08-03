@@ -1,0 +1,43 @@
+{
+  "name": "@megaai/orchestrator",
+  "version": "0.1.0",
+  "description": "Orchestrator: turns goals into plans, workflows and agent executions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0",
+    "@megaai/config": "0.1.0",
+    "@megaai/logger": "0.1.0",
+    "@megaai/events": "0.1.0",
+    "@megaai/runtime": "0.1.0",
+    "@megaai/resources": "0.1.0",
+    "@megaai/ai": "0.1.0",
+    "@megaai/memory": "0.1.0",
+    "@megaai/policy": "0.1.0",
+    "@megaai/planning": "0.1.0",
+    "@megaai/workflow": "0.1.0",
+    "@megaai/tools": "0.1.0",
+    "@megaai/actions": "0.1.0",
+    "@megaai/agents": "0.1.0",
+    "@megaai/meta-brain": "0.1.0",
+    "@megaai/security": "0.1.0",
+    "@megaai/database": "0.1.0",
+    "@megaai/context": "0.1.0",
+    "@megaai/prompt": "0.1.0"
+  },
+  "license": "MIT"
+}

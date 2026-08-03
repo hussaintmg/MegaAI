@@ -1,0 +1,73 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../types"
+    },
+    {
+      "path": "../utils"
+    },
+    {
+      "path": "../config"
+    },
+    {
+      "path": "../logger"
+    },
+    {
+      "path": "../events"
+    },
+    {
+      "path": "../runtime"
+    },
+    {
+      "path": "../resources"
+    },
+    {
+      "path": "../ai"
+    },
+    {
+      "path": "../memory"
+    },
+    {
+      "path": "../policy"
+    },
+    {
+      "path": "../planning"
+    },
+    {
+      "path": "../workflow"
+    },
+    {
+      "path": "../tools"
+    },
+    {
+      "path": "../actions"
+    },
+    {
+      "path": "../agents"
+    },
+    {
+      "path": "../meta-brain"
+    },
+    {
+      "path": "../security"
+    },
+    {
+      "path": "../database"
+    },
+    {
+      "path": "../context"
+    },
+    {
+      "path": "../prompt"
+    }
+  ]
+}
