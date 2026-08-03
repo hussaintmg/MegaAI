@@ -85,3 +85,94 @@ test('git tools work through the tool contract and stay in the workspace', async
     cleanup();
   }
 });
+
+test('branch, checkout and merge collaborate cleanly', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'a.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+    const main = await engine.currentBranch(dir);
+
+    await engine.createBranch(dir, 'feature');
+    assert.deepEqual(
+      (await engine.listBranches(dir)).map((b) => b.name).sort(),
+      [main, 'feature'].sort(),
+    );
+
+    await engine.checkout(dir, 'feature');
+    assert.equal(await engine.currentBranch(dir), 'feature');
+    writeFileSync(join(dir, 'b.txt'), 'from feature\n');
+    await engine.commitAll(dir, 'feature work');
+
+    await engine.checkout(dir, main as string);
+    const merged = await engine.merge(dir, 'feature');
+    assert.equal(merged.merged, true);
+    assert.equal(merged.conflict, false);
+    assert.ok(merged.sha);
+    assert.deepEqual(
+      (await engine.log(dir)).map((c) => c.message),
+      ['feature work', 'base'],
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge reports a conflict and leaves a clean tree instead of throwing', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'x.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+    const main = await engine.currentBranch(dir);
+
+    await engine.checkout(dir, 'feature', { create: true });
+    writeFileSync(join(dir, 'x.txt'), 'from feature\n');
+    await engine.commitAll(dir, 'feature edit');
+
+    await engine.checkout(dir, main as string);
+    writeFileSync(join(dir, 'x.txt'), 'from main\n');
+    await engine.commitAll(dir, 'main edit');
+
+    const result = await engine.merge(dir, 'feature');
+    assert.equal(result.merged, false);
+    assert.equal(result.conflict, true);
+    assert.deepEqual(await engine.status(dir), []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('push is rejected when the remote is not on the allowlist, and succeeds once allowlisted', async () => {
+  const { dir: work, cleanup: cleanupWork } = workspace();
+  const { dir: bare, cleanup: cleanupBare } = workspace();
+  try {
+    const engine = new GitEngine();
+    const initBare = await engine.run(bare, ['init', '--bare']);
+    assert.equal(initBare.exitCode, 0);
+
+    writeFileSync(join(work, 'a.txt'), 'one\n');
+    await engine.commitAll(work, 'first');
+    await engine.addRemote(work, 'origin', bare);
+    assert.equal(await engine.remoteUrl(work, 'origin'), bare);
+
+    const findPush = (tools: ReturnType<typeof createGitTools>) => tools.find((t) => t.name === 'git.push')!;
+
+    const deniedPush = findPush(createGitTools(engine, { allowedRemotes: [] }));
+    await assert.rejects(deniedPush.execute({}, { workspaceRoot: work }), /not on the git push allowlist/);
+
+    const allowedPush = findPush(createGitTools(engine, { allowedRemotes: [bare] }));
+    const branch = await engine.currentBranch(work);
+    const result = (await allowedPush.execute({ setUpstream: true }, { workspaceRoot: work })) as {
+      pushed: boolean;
+    };
+    assert.equal(result.pushed, true);
+
+    const remoteLog = await engine.run(bare, ['log', '--pretty=%s', branch as string]);
+    assert.match(remoteLog.stdout, /first/);
+  } finally {
+    cleanupWork();
+    cleanupBare();
+  }
+});

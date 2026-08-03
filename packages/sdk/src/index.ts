@@ -188,7 +188,9 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     shellAllowlist: config.security.shellAllowlist,
     httpAllowedHosts: config.security.httpAllowedHosts,
   });
-  for (const tool of createGitTools(new GitEngine())) tools.register(tool);
+  for (const tool of createGitTools(new GitEngine(), { allowedRemotes: config.security.allowedGitRemotes ?? [] })) {
+    tools.register(tool);
+  }
   for (const tool of options.extraTools ?? []) tools.register(tool);
   const contextEngine = new ContextEngine({ memory, planning });
   const meta = new MetaBrain({ database, bus, clock, resources });

@@ -67,6 +67,8 @@ export interface MegaConfig {
     allowShell: boolean;
     shellAllowlist: string[];
     httpAllowedHosts: string[];
+    /** Remote hosts (or exact local paths) `git.push` may target. Empty = deny all pushes. */
+    allowedGitRemotes: string[];
   };
   server: {
     host: string;
@@ -101,7 +103,7 @@ export function defaultConfig(): MegaConfig {
     },
     policy: {
       autoApprove: false,
-      approvalRequiredPermissions: ['deploy', 'shell.exec', 'comm.send'],
+      approvalRequiredPermissions: ['deploy', 'shell.exec', 'comm.send', 'git.push'],
       deniedPermissions: [],
     },
     workflow: { maxStepAttempts: 3, stepRetryBaseMs: 250 },
@@ -115,6 +117,7 @@ export function defaultConfig(): MegaConfig {
       allowShell: false,
       shellAllowlist: ['node', 'npm', 'git', 'ls', 'cat'],
       httpAllowedHosts: [],
+      allowedGitRemotes: [],
     },
     server: { host: '127.0.0.1', port: 4100 },
   };
