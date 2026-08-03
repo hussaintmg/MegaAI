@@ -1,0 +1,28 @@
+{
+  "name": "@megaai/workflow",
+  "version": "0.1.0",
+  "description": "Workflow engine: steps, retries, rollback, checkpoints, pause/resume, approvals",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0",
+    "@megaai/events": "0.1.0",
+    "@megaai/database": "0.1.0",
+    "@megaai/policy": "0.1.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@megaai/policy",
+  "version": "0.1.0",
+  "description": "Policy engine: rules, time windows, limits, approval requirements",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0",
+    "@megaai/events": "0.1.0",
+    "@megaai/config": "0.1.0"
+  },
+  "license": "MIT"
+}
