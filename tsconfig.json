@@ -1,0 +1,80 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/types"
+    },
+    {
+      "path": "packages/utils"
+    },
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/config"
+    },
+    {
+      "path": "packages/logger"
+    },
+    {
+      "path": "packages/events"
+    },
+    {
+      "path": "packages/database"
+    },
+    {
+      "path": "packages/security"
+    },
+    {
+      "path": "packages/runtime"
+    },
+    {
+      "path": "packages/resources"
+    },
+    {
+      "path": "packages/ai"
+    },
+    {
+      "path": "packages/memory"
+    },
+    {
+      "path": "packages/policy"
+    },
+    {
+      "path": "packages/planning"
+    },
+    {
+      "path": "packages/workflow"
+    },
+    {
+      "path": "packages/tools"
+    },
+    {
+      "path": "packages/actions"
+    },
+    {
+      "path": "packages/prompt"
+    },
+    {
+      "path": "packages/context"
+    },
+    {
+      "path": "packages/agents"
+    },
+    {
+      "path": "packages/meta-brain"
+    },
+    {
+      "path": "packages/orchestrator"
+    },
+    {
+      "path": "packages/sdk"
+    },
+    {
+      "path": "apps/cli"
+    },
+    {
+      "path": "apps/server"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# runtime state and demo output
+workspace/
+.megaai/
+*.log
+
+# env / secrets
+.env
+.env.*
+
+# editors & os
+.DS_Store
+.idea/
+.vscode/

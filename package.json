@@ -1,0 +1,31 @@
+{
+  "name": "megaai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MegaAI — an autonomous AI company operating system: plan, build, test, deploy and learn with a fleet of coordinated agents.",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "clean": "node scripts/clean.mjs",
+    "test": "npm run build && node --test \"packages/**/*.test.js\"",
+    "demo": "npm run build && node apps/cli/dist/index.js demo",
+    "start": "npm run build && node apps/server/dist/index.js",
+    "cli": "node apps/cli/dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hussaintmg/MegaAI.git"
+  }
+}
