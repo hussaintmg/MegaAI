@@ -101,7 +101,7 @@ export function defaultConfig(): MegaConfig {
     },
     policy: {
       autoApprove: false,
-      approvalRequiredPermissions: ['deploy', 'shell.exec', 'comm.send'],
+      approvalRequiredPermissions: ['deploy', 'shell.exec', 'comm.send', 'git.push'],
       deniedPermissions: [],
     },
     workflow: { maxStepAttempts: 3, stepRetryBaseMs: 250 },

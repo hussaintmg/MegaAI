@@ -144,6 +144,73 @@ export class GitEngine {
     const result = await this.run(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
     return result.exitCode === 0 ? result.stdout.trim() : undefined;
   }
+
+  async listBranches(cwd: string): Promise<string[]> {
+    if (!this.isRepo(cwd)) return [];
+    const result = await this.run(cwd, ['branch', '--list', '--format=%(refname:short)']);
+    if (result.exitCode !== 0) return [];
+    return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+
+  /** Create (or switch to) a branch. `from` defaults to the current HEAD. */
+  async createBranch(cwd: string, name: string, from?: string): Promise<void> {
+    if (!name.trim()) throw new MegaError('INVALID_INPUT', 'Branch name must not be empty');
+    if (!this.isRepo(cwd)) throw new MegaError('INVALID_INPUT', 'Workspace is not a git repository');
+    const args = from ? ['checkout', '-b', name, from] : ['checkout', '-b', name];
+    const result = await this.run(cwd, args);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git branch create failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+  }
+
+  async checkout(cwd: string, name: string): Promise<void> {
+    if (!name.trim()) throw new MegaError('INVALID_INPUT', 'Branch name must not be empty');
+    if (!this.isRepo(cwd)) throw new MegaError('INVALID_INPUT', 'Workspace is not a git repository');
+    const result = await this.run(cwd, ['checkout', name]);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git checkout failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+  }
+
+  /** Merge `from` into the current branch. Returns conflict paths, if any (no commit made). */
+  async merge(cwd: string, from: string): Promise<{ merged: boolean; conflicts: string[] }> {
+    if (!from.trim()) throw new MegaError('INVALID_INPUT', 'Branch name must not be empty');
+    if (!this.isRepo(cwd)) throw new MegaError('INVALID_INPUT', 'Workspace is not a git repository');
+    const result = await this.run(cwd, ['merge', '--no-edit', from]);
+    if (result.exitCode === 0) return { merged: true, conflicts: [] };
+    const conflicted = await this.run(cwd, ['diff', '--name-only', '--diff-filter=U']);
+    const conflicts = conflicted.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (conflicts.length > 0) {
+      await this.run(cwd, ['merge', '--abort']);
+      return { merged: false, conflicts };
+    }
+    throw new MegaError('INTERNAL', `git merge failed: ${(result.stderr || result.stdout).trim()}`);
+  }
+
+  async addRemote(cwd: string, name: string, url: string): Promise<void> {
+    if (!this.isRepo(cwd)) throw new MegaError('INVALID_INPUT', 'Workspace is not a git repository');
+    const existing = await this.run(cwd, ['remote']);
+    const remotes = existing.stdout.split('\n').map((line) => line.trim());
+    const args = remotes.includes(name) ? ['remote', 'set-url', name, url] : ['remote', 'add', name, url];
+    const result = await this.run(cwd, args);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git remote add failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+  }
+
+  /** Push the current (or given) branch to a remote. Never runs implicitly — callers gate this behind approval. */
+  async push(cwd: string, options: { remote?: string; branch?: string; setUpstream?: boolean } = {}): Promise<GitResult> {
+    if (!this.isRepo(cwd)) throw new MegaError('INVALID_INPUT', 'Workspace is not a git repository');
+    const remote = options.remote ?? 'origin';
+    const branch = options.branch ?? (await this.currentBranch(cwd));
+    if (!branch) throw new MegaError('INVALID_INPUT', 'No branch to push (detached HEAD?)');
+    const args = options.setUpstream ? ['push', '-u', remote, branch] : ['push', remote, branch];
+    const result = await this.run(cwd, args);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git push failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+    return result;
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -200,5 +267,59 @@ export function createGitTools(engine: GitEngine = new GitEngine()): Tool[] {
       return { diff: await engine.diff(ctx.workspaceRoot, { staged: input.staged === true }) };
     },
   };
-  return [commit, status, log, diff];
+  const branch: Tool = {
+    name: 'git.branch',
+    description: 'List branches, or create (and switch to) a new one when "name" is given',
+    inputSchema: { name: 'string (optional, branch to create)', from: 'string (optional, base ref)' },
+    permissions: ['git.write'],
+    async execute(input, ctx) {
+      const name = typeof input.name === 'string' ? input.name : undefined;
+      if (!name) {
+        const branches = (await engine.listBranches(ctx.workspaceRoot)) as unknown as JsonValue;
+        return { branches } as JsonValue;
+      }
+      const from = typeof input.from === 'string' ? input.from : undefined;
+      await engine.createBranch(ctx.workspaceRoot, name, from);
+      return { created: name } as JsonValue;
+    },
+  };
+  const checkout: Tool = {
+    name: 'git.checkout',
+    description: 'Switch the workspace repository to an existing branch',
+    inputSchema: { name: 'string (branch to switch to)' },
+    permissions: ['git.write'],
+    async execute(input, ctx) {
+      await engine.checkout(ctx.workspaceRoot, str(input, 'name'));
+      return { branch: str(input, 'name') };
+    },
+  };
+  const merge: Tool = {
+    name: 'git.merge',
+    description: 'Merge a branch into the current branch; reports conflicts instead of leaving a half-merge',
+    inputSchema: { from: 'string (branch to merge in)' },
+    permissions: ['git.write'],
+    async execute(input, ctx) {
+      const result = await engine.merge(ctx.workspaceRoot, str(input, 'from'));
+      return result as unknown as JsonValue;
+    },
+  };
+  const push: Tool = {
+    name: 'git.push',
+    description: 'Push the workspace repository to a remote — human-approval-gated, never runs unattended',
+    inputSchema: {
+      remote: 'string (optional, default "origin")',
+      branch: 'string (optional, default current branch)',
+      setUpstream: 'boolean (optional)',
+    },
+    permissions: ['git.push'],
+    async execute(input, ctx) {
+      const result = await engine.push(ctx.workspaceRoot, {
+        remote: typeof input.remote === 'string' ? input.remote : undefined,
+        branch: typeof input.branch === 'string' ? input.branch : undefined,
+        setUpstream: input.setUpstream === true,
+      });
+      return { pushed: true, stdout: result.stdout, stderr: result.stderr } as unknown as JsonValue;
+    },
+  };
+  return [commit, status, log, diff, branch, checkout, merge, push];
 }

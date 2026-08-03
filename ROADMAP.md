@@ -52,7 +52,7 @@ model these plug into already exists.
       every delivery workspace versioned automatically as a real repository
 - [x] Real test execution: the testing agent runs `node --test` through the
       gated shell tool (`expectSuccess` makes red suites fail the task)
-- [ ] Git collaboration (branches, merge, remote push behind approval)
+- [x] Git collaboration (branches, merge, remote push behind approval)
 - [ ] Real build pipelines (npm install/build on top of the gated shell tool)
 - [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)

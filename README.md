@@ -150,8 +150,8 @@ workspace/build-a-small-api-for-invoices-52dd94/
 
 Agents can only touch files inside their workspace (path-escape attempts are
 blocked), shell execution is off by default behind an allowlist, HTTP is
-allowlist-only, `deploy`/`shell.exec` permissions are approval-gated, and
-every action lands in the audit log.
+allowlist-only, `deploy`/`shell.exec`/`git.push` permissions are
+approval-gated, and every action lands in the audit log.
 
 ## Packages
 
