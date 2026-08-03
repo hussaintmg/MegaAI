@@ -56,6 +56,9 @@
       "path": "packages/prompt"
     },
     {
+      "path": "packages/code"
+    },
+    {
       "path": "packages/context"
     },
     {

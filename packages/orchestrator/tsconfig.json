@@ -55,6 +55,9 @@
       "path": "../agents"
     },
     {
+      "path": "../code"
+    },
+    {
       "path": "../meta-brain"
     },
     {

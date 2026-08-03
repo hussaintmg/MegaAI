@@ -35,6 +35,7 @@ import { ActionEngine } from '@megaai/actions';
 import { buildTaskMessages } from '@megaai/prompt';
 import type { ContextEngine } from '@megaai/context';
 import { AgentRuntime, type PreparedContext } from '@megaai/agents';
+import { GitEngine } from '@megaai/code';
 import type { AgentImplementation } from '@megaai/contracts';
 import type { MetaBrain } from '@megaai/meta-brain';
 
@@ -75,6 +76,7 @@ export class Orchestrator {
   private readonly clock: Clock;
   private readonly log: Logger;
   private readonly workspaceIndex;
+  private readonly git = new GitEngine();
 
   constructor(options: OrchestratorOptions) {
     this.o = options;
@@ -157,6 +159,7 @@ export class Orchestrator {
       ctx: {
         workspaceRoot,
         toolCatalog: this.o.tools.describeForPrompt(descriptor.allowedTools),
+        capabilities: { shell: this.o.config.security.allowShell },
         session,
         act: (actions) =>
           this.actions.execute(actions, {
@@ -341,7 +344,21 @@ export class Orchestrator {
       `_Generated ${new Date(this.clock.now()).toISOString()} by MegaAI._`,
     ];
     writeFileSync(join(workspaceDir, 'MEGAAI_REPORT.md'), `${lines.join('\n')}\n`, 'utf8');
-    return { report: 'MEGAAI_REPORT.md' };
+
+    // Version the delivery: every finished workspace becomes a git repo with
+    // the whole delivery (report included) as a commit. Best-effort — a
+    // machine without git still gets its files and report.
+    let commitSha: string | null = null;
+    try {
+      if (await GitEngine.isAvailable()) {
+        commitSha =
+          (await this.git.commitAll(workspaceDir, `MegaAI delivery: ${project?.name ?? goal}`)) ?? null;
+        if (commitSha) this.log.info('delivery versioned', { commit: commitSha.slice(0, 8) });
+      }
+    } catch (err) {
+      this.log.warn('could not version the delivery workspace', { error: String(err) });
+    }
+    return { report: 'MEGAAI_REPORT.md', commit: commitSha };
   }
 
   /* ---------------------------- observability ------------------------ */

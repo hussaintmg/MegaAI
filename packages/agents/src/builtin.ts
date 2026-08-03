@@ -33,6 +33,7 @@ export class ModelDrivenAgent implements AgentImplementation {
         taskDescription: task.description,
         taskId: task.id,
         projectId: task.projectId,
+        shellEnabled: ctx.capabilities?.shell === true,
       },
     });
 
@@ -66,8 +67,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'Coding Agent',
     description: 'Implements features, writes and edits source code',
     systemPrompt:
-      'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders.',
-    allowedTools: [...FS_TOOLS, 'fs.delete', 'shell.exec'],
+      'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders. Commit finished work with git.commit.',
+    allowedTools: [...FS_TOOLS, 'fs.delete', 'shell.exec', 'git.commit', 'git.status', 'git.diff'],
     defaultComplexity: 'complex',
   },
   {
@@ -75,8 +76,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'Testing Agent',
     description: 'Writes and runs tests, verifies behaviour',
     systemPrompt:
-      'You are a meticulous QA engineer. Write focused automated tests for the task at hand, run them when a shell is available, and report exactly what passed and failed.',
-    allowedTools: [...FS_TOOLS, 'shell.exec'],
+      'You are a meticulous QA engineer. Write focused automated tests for the task at hand, run them when a shell is available (use expectSuccess so failures are loud), and report exactly what passed and failed.',
+    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.status'],
     defaultComplexity: 'standard',
   },
   {
@@ -85,7 +86,7 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     description: 'Reviews code and plans for defects and risks',
     systemPrompt:
       'You are a code reviewer. Read the relevant files and report every defect or risk you find, including low-confidence ones, each with severity. Do not modify files.',
-    allowedTools: ['fs.read', 'fs.list'],
+    allowedTools: ['fs.read', 'fs.list', 'git.log', 'git.diff', 'git.status'],
     defaultComplexity: 'standard',
   },
   {
@@ -130,7 +131,7 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     description: 'Prepares builds, deployment plans and release checklists',
     systemPrompt:
       'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated.',
-    allowedTools: [...FS_TOOLS, 'shell.exec'],
+    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.commit', 'git.log', 'git.status'],
     defaultComplexity: 'standard',
   },
   {

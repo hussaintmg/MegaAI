@@ -46,7 +46,7 @@ function codeFilesFor(title: string, description: string): FilePlan[] {
     return [
       {
         path: 'package.json',
-        content: `${JSON.stringify({ name: slug, version: '0.1.0', private: true, type: 'module', scripts: { start: 'node src/index.js', test: 'node --test tests' } }, null, 2)}\n`,
+        content: `${JSON.stringify({ name: slug, version: '0.1.0', private: true, type: 'module', scripts: { start: 'node src/index.js', test: 'node --test "tests/**/*.test.js"' } }, null, 2)}\n`,
       },
       { path: 'src/index.js', content: `// Application entrypoint\nimport { createServer } from './server.js';\n\ncreateServer().listen(process.env.PORT ?? 3000);\nconsole.log('app started');\n` },
       { path: '.gitignore', content: 'node_modules/\n.env\n' },
@@ -132,7 +132,19 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
         },
         reason: title,
       });
-      summary = `Wrote and ran tests for "${title}": 3 checks, all passing.`;
+      if (meta.shellEnabled === true) {
+        // Really execute the suite — expectSuccess makes a red run fail the
+        // task. A glob (expanded by Node's own test runner) is used because
+        // bare directory args are treated as entry files on Node 22.
+        actions.push({
+          tool: 'shell.exec',
+          input: { command: 'node', args: ['--test', 'tests/**/*.test.js'], expectSuccess: true },
+          reason: 'run the test suite for real',
+        });
+        summary = `Wrote tests for "${title}" and executed them with node --test — suite green.`;
+      } else {
+        summary = `Wrote tests for "${title}" (shell disabled here, so execution was skipped).`;
+      }
       break;
     }
     case 'documentation': {

@@ -112,6 +112,8 @@ export interface AgentContext {
   workspaceRoot: string;
   /** Rendered catalog of the tools this agent may call (for prompts). */
   toolCatalog: string;
+  /** What the environment actually permits right now (shell on/off, …). */
+  capabilities?: { shell?: boolean };
   session: AiSession;
   /** Executes model-proposed actions through policy + tools. */
   act(actions: ActionRequest[]): Promise<AgentRunResult['actions']>;

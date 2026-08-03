@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMegaAI, Events, MockProvider } from './index.js';
+import { createMegaAI, Events, GitEngine, MockProvider } from './index.js';
 
 function tempDirs(): { root: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'megaai-e2e-'));
@@ -22,7 +22,7 @@ test('submitGoal runs an ecommerce goal end to end on the mock provider', async 
       persistent: false,
       quiet: true,
       configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
-      configOverrides: { policy: { autoApprove: true } },
+      configOverrides: { policy: { autoApprove: true }, security: { allowShell: true } },
     });
     await megaai.start();
 
@@ -43,6 +43,19 @@ test('submitGoal runs an ecommerce goal end to end on the mock provider', async 
     assert.ok(existsSync(join(result.workspaceDir, 'src', 'auth', 'auth.js')));
     const report = readFileSync(join(result.workspaceDir, 'MEGAAI_REPORT.md'), 'utf8');
     assert.match(report, /completed/);
+
+    // The delivery was versioned: the workspace is a git repo with a commit.
+    const git = new GitEngine();
+    assert.equal(git.isRepo(result.workspaceDir), true);
+    const history = await git.log(result.workspaceDir);
+    assert.ok(history.some((entry) => entry.message.startsWith('MegaAI delivery:')));
+
+    // The testing agent really executed the suite (shell was enabled).
+    const shellRuns = megaai.bus
+      .history('actions.executed', 1000)
+      .filter((event) => (event.payload as { tool?: string; ok?: boolean }).tool === 'shell.exec');
+    assert.ok(shellRuns.length >= 1, 'expected the test suite to actually run via shell.exec');
+    assert.equal(shellRuns.every((event) => (event.payload as { ok: boolean }).ok), true);
 
     // The whole pipeline emitted its lifecycle events.
     for (const expected of [

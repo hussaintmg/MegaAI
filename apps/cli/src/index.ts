@@ -31,6 +31,7 @@ const cyan = (text: string) => paint('36', text);
 function walkFiles(dir: string, base = dir): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
+    if (entry === '.git' || entry === 'node_modules') continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...walkFiles(full, base));
     else out.push(relative(base, full));
@@ -65,7 +66,12 @@ async function executeGoal(goal: string, options: { persistent: boolean; quiet: 
   const megaai = createMegaAI({
     persistent: options.persistent,
     quiet: true, // CLI renders its own progress; full logs stay in the buffer
-    configOverrides: { policy: { autoApprove: true } },
+    configOverrides: {
+      policy: { autoApprove: true },
+      // Let the testing agent really execute suites (node --test) and let
+      // coding agents commit; both stay allowlisted and sandboxed.
+      security: { allowShell: true },
+    },
   });
   await megaai.start();
   if (!options.quiet) watchProgress(megaai);

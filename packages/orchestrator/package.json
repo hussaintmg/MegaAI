@@ -33,6 +33,7 @@
     "@megaai/tools": "0.1.0",
     "@megaai/actions": "0.1.0",
     "@megaai/agents": "0.1.0",
+    "@megaai/code": "0.1.0",
     "@megaai/meta-brain": "0.1.0",
     "@megaai/security": "0.1.0",
     "@megaai/database": "0.1.0",

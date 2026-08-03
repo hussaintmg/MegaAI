@@ -43,13 +43,17 @@ Where MegaAI first does real work.
 - [x] Dashboard + REST API + SSE event stream
 - [x] CLI (demo / run / plan / status)
 
-## Phase 3 — Automation layer 🔜
+## Phase 3 — Automation layer 🚧 (in progress)
 
 Reaching out of the workspace into the real world. The tool/permission
 model these plug into already exists.
 
-- [ ] Git tool suite (repos, branches, commits, diff, merge, review) — code engine
-- [ ] Real shell workflows (build/test pipelines on top of the gated shell tool)
+- [x] Code engine v1 (`@megaai/code`): git tool suite (`git.commit/status/log/diff`),
+      every delivery workspace versioned automatically as a real repository
+- [x] Real test execution: the testing agent runs `node --test` through the
+      gated shell tool (`expectSuccess` makes red suites fail the task)
+- [ ] Git collaboration (branches, merge, remote push behind approval)
+- [ ] Real build pipelines (npm install/build on top of the gated shell tool)
 - [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
 - [ ] Vision (screenshots, UI understanding, image analysis)

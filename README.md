@@ -132,14 +132,17 @@ tier on retry.
 
 ## What a goal produces
 
-Every goal gets its own sandboxed directory under `workspace/`:
+Every goal gets its own sandboxed directory under `workspace/` — and every
+finished delivery is a **real git repository**, committed automatically by
+the code engine:
 
 ```
 workspace/build-a-small-api-for-invoices-52dd94/
+├── .git/                 ← versioned delivery ("MegaAI delivery: …")
 ├── MEGAAI_REPORT.md      ← delivery report: tasks, states, AI usage, cost
 ├── package.json          ← written by the coding agent
 ├── src/…                 ← implementation files
-├── tests/…               ← written by the testing agent
+├── tests/…               ← written AND executed (node --test) by the testing agent
 ├── docs/…                ← written by the documentation agent
 ├── marketing/…           ← written by the marketing agent
 └── DEPLOYMENT.md         ← written by the devops agent

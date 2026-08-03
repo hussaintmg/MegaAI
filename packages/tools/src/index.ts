@@ -216,6 +216,9 @@ export function createShellTool(options: ShellToolOptions): Tool {
         throw new MegaError('PERMISSION_DENIED', `Binary "${command}" is not on the shell allowlist`);
       }
       const args = Array.isArray(input.args) ? input.args.map(String) : [];
+      // expectSuccess turns a non-zero exit into a hard failure so callers
+      // (e.g. the testing agent's real test runs) can't silently pass.
+      const expectSuccess = input.expectSuccess === true;
       try {
         const { stdout, stderr } = await execFileAsync(command, args, {
           cwd: ctx.workspaceRoot,
@@ -225,8 +228,15 @@ export function createShellTool(options: ShellToolOptions): Tool {
         return { exitCode: 0, stdout: stdout.slice(0, 50_000), stderr: stderr.slice(0, 50_000) };
       } catch (err) {
         const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
+        const exitCode = typeof e.code === 'number' ? e.code : 1;
+        if (expectSuccess) {
+          throw new MegaError(
+            'INTERNAL',
+            `command "${command}" failed (exit ${exitCode}): ${(e.stderr ?? e.stdout ?? e.message ?? '').slice(0, 2_000)}`,
+          );
+        }
         return {
-          exitCode: typeof e.code === 'number' ? e.code : 1,
+          exitCode,
           stdout: (e.stdout ?? '').slice(0, 50_000),
           stderr: (e.stderr ?? e.message ?? '').slice(0, 50_000),
         };
