@@ -70,6 +70,15 @@ export const SETTINGS_HTML = `<!doctype html>
   </section>
 
   <section>
+    <h2>Deployment</h2>
+    <div class="grid2">
+      <div><label>Vercel token</label><input type="password" id="deploy_vercel" placeholder="not set" /></div>
+      <div><label>Railway token</label><input type="password" id="deploy_railway" placeholder="not set" /></div>
+    </div>
+    <p class="note">Tokens are injected into the deploy command and redacted from all logs. Real deploys also need a shell to be enabled.</p>
+  </section>
+
+  <section>
     <h2>Autonomy</h2>
     <label><input type="checkbox" id="autoApprove" /> Auto-approve plans and gated actions (no human approval step)</label>
   </section>
@@ -113,6 +122,9 @@ function render() {
   el('email_smtpHost').value = e.smtpHost || '';
   el('email_apiKey').placeholder = e.apiKey ? e.apiKey : 'not set';
   el('email_enabled').checked = !!e.enabled;
+  var d = state.settings.deploy || {};
+  el('deploy_vercel').placeholder = d.vercelToken ? d.vercelToken : 'not set';
+  el('deploy_railway').placeholder = d.railwayToken ? d.railwayToken : 'not set';
   el('autoApprove').checked = !!(state.settings.policy && state.settings.policy.autoApprove);
 }
 
@@ -142,6 +154,7 @@ function collect() {
       apiKey: el('email_apiKey').value,
       smtpHost: el('email_smtpHost').value.trim()
     },
+    deploy: { vercelToken: el('deploy_vercel').value, railwayToken: el('deploy_railway').value },
     policy: { autoApprove: el('autoApprove').checked }
   };
 }

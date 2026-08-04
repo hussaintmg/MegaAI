@@ -273,6 +273,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   const deployEngine = new DeployEngine({
     defaultTarget: config.deploy.defaultTarget as DeployTarget,
     clock,
+    tokens: { vercel: config.deploy.vercelToken || undefined, railway: config.deploy.railwayToken || undefined },
     runner: config.security.allowShell
       ? createCommandRunner({ enabled: true, allowlist: config.security.shellAllowlist })
       : undefined,

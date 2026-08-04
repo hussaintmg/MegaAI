@@ -10,6 +10,10 @@ workspace/
 .megaai/
 *.log
 
+# trained-model output from the Colab notebook
+notebooks/megaai-models/
+notebooks/*.zip
+
 # env / secrets
 .env
 .env.*

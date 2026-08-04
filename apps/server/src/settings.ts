@@ -26,10 +26,16 @@ export interface EmailSettings {
   smtpHost?: string;
 }
 
+export interface DeploySettings {
+  vercelToken?: string;
+  railwayToken?: string;
+}
+
 export interface Settings {
   providers?: Record<string, ProviderSettings>;
   fallbackChain?: string[];
   email?: EmailSettings;
+  deploy?: DeploySettings;
   policy?: { autoApprove?: boolean };
 }
 
@@ -85,6 +91,13 @@ export function mergeSettings(existing: Settings, incoming: Settings): Settings 
       apiKey: realKey(incoming.email.apiKey) ?? prev.apiKey,
     };
   }
+  if (incoming.deploy) {
+    const prev = existing.deploy ?? {};
+    merged.deploy = {
+      vercelToken: realKey(incoming.deploy.vercelToken) ?? prev.vercelToken,
+      railwayToken: realKey(incoming.deploy.railwayToken) ?? prev.railwayToken,
+    };
+  }
   if (incoming.policy) merged.policy = { ...existing.policy, ...incoming.policy };
   return merged;
 }
@@ -116,6 +129,9 @@ export function settingsToOverrides(settings: Settings): JsonObject {
       },
     };
   }
+  if (settings.deploy && (settings.deploy.vercelToken || settings.deploy.railwayToken)) {
+    overrides.deploy = { vercelToken: settings.deploy.vercelToken ?? '', railwayToken: settings.deploy.railwayToken ?? '' };
+  }
   if (settings.policy?.autoApprove !== undefined) overrides.policy = { autoApprove: settings.policy.autoApprove };
   return overrides;
 }
@@ -132,6 +148,7 @@ export function redactSettings(settings: Settings): Settings {
     providers[kind] = { enabled: prov.enabled ?? true, model: prov.model ?? '', apiKey: prov.apiKey ? maskKey(prov.apiKey) : '' };
   }
   const email = settings.email ?? {};
+  const deploy = settings.deploy ?? {};
   return {
     providers,
     fallbackChain: settings.fallbackChain ?? [],
@@ -142,6 +159,10 @@ export function redactSettings(settings: Settings): Settings {
       apiUrl: email.apiUrl ?? '',
       smtpHost: email.smtpHost ?? '',
       apiKey: email.apiKey ? maskKey(email.apiKey) : '',
+    },
+    deploy: {
+      vercelToken: deploy.vercelToken ? maskKey(deploy.vercelToken) : '',
+      railwayToken: deploy.railwayToken ? maskKey(deploy.railwayToken) : '',
     },
     policy: { autoApprove: settings.policy?.autoApprove ?? false },
   };
@@ -174,6 +195,14 @@ export function parseIncoming(body: Record<string, unknown>): Settings {
       apiUrl: typeof e.apiUrl === 'string' ? e.apiUrl : undefined,
       apiKey: typeof e.apiKey === 'string' ? e.apiKey : undefined,
       smtpHost: typeof e.smtpHost === 'string' ? e.smtpHost : undefined,
+    };
+  }
+  const deployIn = body.deploy;
+  if (deployIn && typeof deployIn === 'object') {
+    const d = deployIn as Record<string, unknown>;
+    out.deploy = {
+      vercelToken: typeof d.vercelToken === 'string' ? d.vercelToken : undefined,
+      railwayToken: typeof d.railwayToken === 'string' ? d.railwayToken : undefined,
     };
   }
   const policyIn = body.policy;

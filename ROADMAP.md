@@ -123,6 +123,13 @@ Self-improving, distributed, extensible.
       fallback chain) to generate a validated `PlanSpec`, sanitising and
       falling back to templates on any failure; `config.meta.planner: 'model'`
       or `megaai run … --model-planner`. Deterministic offline via the mock.
+- [x] Bring-your-own-keys: OpenRouter + Groq providers (OpenAI-compatible, base-
+      URL adapter); a dashboard **Settings** page (`/settings`) to enter provider
+      API keys, the fallback order, email delivery and a Vercel/Railway deploy
+      token — persisted to `.megaai/settings.json` (local, gitignored) and
+      hot-applied by rebuilding the engine in place. A Colab notebook
+      (`notebooks/`) trains the models pack on larger data and exports drop-in
+      bundles the runtime loads unchanged.
 - [ ] Planning critic loop (generate → critique → refine)
 - [ ] Real embeddings + semantic retrieval (swap `embed()`; add re-ranking)
 - [ ] Learning-driven routing (choose provider/model/agent from outcome stats automatically)

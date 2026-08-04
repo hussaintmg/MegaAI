@@ -120,18 +120,30 @@ MegaAI runs on a **fallback chain** — the vision's "Claude limit? → try the
 next provider" behaviour is built into the session manager:
 
 ```
-anthropic (Claude, default claude-opus-5) → openai-compatible → gemini → mock
+anthropic → openai-compatible → gemini → openrouter → groq → mock
 ```
 
-- `ANTHROPIC_API_KEY` — Claude via the official `@anthropic-ai/sdk`
-- `OPENAI_API_KEY` — any OpenAI-compatible endpoint (Codex/OpenCode-style backends work via `baseURL`)
-- `GEMINI_API_KEY` — Google Gemini
+Bring your own keys **two ways**:
 
-Rate limits are tracked per provider (requests/minute, tokens/day); a
-provider that answers 429 is cooled down and the chain moves on — mid-task,
-without the agent noticing. Model tiers (`fast` / `balanced` / `frontier`)
-are chosen per task complexity, and failed tasks escalate to a stronger
-tier on retry.
+- **In the dashboard** (recommended) — open `http://127.0.0.1:4100/settings`,
+  enter a key for any provider, set the fallback order, hit save. Keys are
+  stored locally in `.megaai/settings.json` (gitignored) and the engine
+  restarts on them immediately. The same page configures email delivery and a
+  Vercel/Railway deploy token.
+- **Environment variables** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`.
+
+OpenRouter and Groq speak the OpenAI wire protocol, so they slot into the same
+adapter. Unconfigured providers are skipped, so with only a Gemini/OpenRouter/
+Groq key the chain lands on the first one that has a key and the rest cover
+limits and outages. Rate limits are tracked per provider (requests/minute,
+tokens/day); a 429 cools a provider down and the chain moves on mid-task,
+without the agent noticing. Model tiers (`fast` / `balanced` / `frontier`) are
+chosen per task complexity, and failed tasks escalate to a stronger tier on
+retry. With no key at all, MegaAI runs fully offline on the mock provider.
+
+Train the models pack harder on Colab and drop the result into
+`.megaai/models/` — see [`notebooks/`](./notebooks/).
 
 ## What a goal produces
 

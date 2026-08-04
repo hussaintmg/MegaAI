@@ -78,6 +78,9 @@ export interface MegaConfig {
   deploy: {
     /** simulated | static | docker | vercel | railway */
     defaultTarget: string;
+    /** Provider tokens for real deploys (redacted in logs/results). */
+    vercelToken: string;
+    railwayToken: string;
   };
   comm: {
     /** Channel for operator notifications: 'captured' | 'webhook' | 'email' | 'none'. */
@@ -152,7 +155,7 @@ export function defaultConfig(): MegaConfig {
       browserAllowedHosts: [],
     },
     server: { host: '127.0.0.1', port: 4100 },
-    deploy: { defaultTarget: 'simulated' },
+    deploy: { defaultTarget: 'simulated', vercelToken: '', railwayToken: '' },
     comm: {
       notifyChannel: 'captured',
       webhookUrl: '',
@@ -204,6 +207,8 @@ function envOverrides(env: NodeJS.ProcessEnv): JsonObject {
   if (env.GEMINI_API_KEY) setPath(['ai', 'providers', 'gemini', 'apiKey'], env.GEMINI_API_KEY);
   if (env.OPENROUTER_API_KEY) setPath(['ai', 'providers', 'openrouter', 'apiKey'], env.OPENROUTER_API_KEY);
   if (env.GROQ_API_KEY) setPath(['ai', 'providers', 'groq', 'apiKey'], env.GROQ_API_KEY);
+  if (env.VERCEL_TOKEN) setPath(['deploy', 'vercelToken'], env.VERCEL_TOKEN);
+  if (env.RAILWAY_TOKEN) setPath(['deploy', 'railwayToken'], env.RAILWAY_TOKEN);
   return out;
 }
 

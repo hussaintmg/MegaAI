@@ -57,7 +57,12 @@ export type CommandRunner = (
   cwd: string,
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
-function buildPlan(target: DeployTarget, appName: string): Omit<DeployPlan, 'appName'> {
+export interface DeployTokens {
+  vercel?: string;
+  railway?: string;
+}
+
+function buildPlan(target: DeployTarget, appName: string, tokens: DeployTokens = {}): Omit<DeployPlan, 'appName'> {
   switch (target) {
     case 'docker':
       return {
@@ -74,7 +79,7 @@ function buildPlan(target: DeployTarget, appName: string): Omit<DeployPlan, 'app
       return {
         target,
         description: 'Deploy to Vercel (production)',
-        commands: [{ command: 'vercel', args: ['deploy', '--prod', '--yes'] }],
+        commands: [{ command: 'vercel', args: ['deploy', '--prod', '--yes', ...(tokens.vercel ? ['--token', tokens.vercel] : [])] }],
         estimatedUrl: `https://${appName}.vercel.app`,
         simulated: false,
       };
@@ -82,7 +87,7 @@ function buildPlan(target: DeployTarget, appName: string): Omit<DeployPlan, 'app
       return {
         target,
         description: 'Deploy to Railway',
-        commands: [{ command: 'railway', args: ['up', '--detach'] }],
+        commands: [{ command: 'railway', args: ['up', '--detach', ...(tokens.railway ? ['--token', tokens.railway] : [])] }],
         estimatedUrl: `https://${appName}.up.railway.app`,
         simulated: false,
       };
@@ -110,17 +115,28 @@ export interface DeployEngineOptions {
   defaultTarget?: DeployTarget;
   /** When absent, every target simulates (no external commands run). */
   runner?: CommandRunner;
+  /** Provider tokens injected into deploy commands (redacted in results/logs). */
+  tokens?: DeployTokens;
   clock?: Clock;
+}
+
+/** Mask any secret token values inside a display string. */
+function redactCommand(display: string, secrets: Array<string | undefined>): string {
+  let out = display;
+  for (const secret of secrets) if (secret && secret.length > 0) out = out.split(secret).join('***');
+  return out;
 }
 
 export class DeployEngine {
   private readonly defaultTarget: DeployTarget;
   private readonly runner?: CommandRunner;
+  private readonly tokens: DeployTokens;
   private readonly clock: Clock;
 
   constructor(options: DeployEngineOptions = {}) {
     this.defaultTarget = options.defaultTarget ?? 'simulated';
     this.runner = options.runner;
+    this.tokens = options.tokens ?? {};
     this.clock = options.clock ?? systemClock;
   }
 
@@ -134,7 +150,13 @@ export class DeployEngine {
       throw new MegaError('INVALID_INPUT', `Unknown deploy target "${target}"`);
     }
     const appName = this.appNameFor(workspaceDir, options.appName);
-    return { ...buildPlan(target, appName), appName };
+    return { ...buildPlan(target, appName, this.tokens), appName };
+  }
+
+  /** Planned commands with any secrets redacted — safe to show/log. */
+  redactedCommands(plan: DeployPlan): string[] {
+    const secrets = [this.tokens.vercel, this.tokens.railway];
+    return plan.commands.map((c) => redactCommand(`${c.command} ${c.args.join(' ')}`.trim(), secrets));
   }
 
   async execute(
@@ -146,10 +168,12 @@ export class DeployEngine {
 
     // Simulated targets — or the absence of a runner — never shell out.
     const canRunReal = this.runner && !plan.simulated && plan.commands.length > 0;
+    const secrets = [this.tokens.vercel, this.tokens.railway];
     if (canRunReal) {
       for (const step of plan.commands) {
         const outcome = await (this.runner as CommandRunner)(step.command, step.args, workspaceDir);
-        steps.push({ command: `${step.command} ${step.args.join(' ')}`.trim(), ok: outcome.exitCode === 0, exitCode: outcome.exitCode });
+        const display = redactCommand(`${step.command} ${step.args.join(' ')}`.trim(), secrets);
+        steps.push({ command: display, ok: outcome.exitCode === 0, exitCode: outcome.exitCode });
         if (outcome.exitCode !== 0) {
           throw new MegaError('INTERNAL', `deploy step "${step.command}" failed (exit ${outcome.exitCode}): ${outcome.stderr.slice(0, 1_000)}`, {
             steps: steps as unknown as JsonValue,

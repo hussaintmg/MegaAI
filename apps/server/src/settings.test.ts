@@ -40,13 +40,22 @@ test('settingsToOverrides only emits configured pieces', () => {
   // Disabled email produces no comm override.
   const noEmail = settingsToOverrides({ email: { enabled: false, from: 'ai@x.dev' } });
   assert.equal((noEmail as { comm?: unknown }).comm, undefined);
+
+  // Deploy tokens flow through as deploy overrides.
+  const withDeploy = settingsToOverrides({ deploy: { vercelToken: 'vt' } }) as { deploy: { vercelToken: string } };
+  assert.equal(withDeploy.deploy.vercelToken, 'vt');
 });
 
 test('redactSettings masks keys and lists every provider', () => {
-  const redacted = redactSettings({ providers: { gemini: { enabled: true, apiKey: 'abcdef1234' } }, email: { enabled: true, from: 'a@b', apiKey: 'secretkey' } });
+  const redacted = redactSettings({
+    providers: { gemini: { enabled: true, apiKey: 'abcdef1234' } },
+    email: { enabled: true, from: 'a@b', apiKey: 'secretkey' },
+    deploy: { vercelToken: 'vercelSECRET99' },
+  });
   assert.equal(redacted.providers?.gemini?.apiKey, '••••1234');
   assert.equal(redacted.providers?.groq?.apiKey, ''); // present but unset
   assert.equal(redacted.email?.apiKey, '••••tkey');
+  assert.equal(redacted.deploy?.vercelToken, '••••ET99');
   assert.ok(Object.keys(redacted.providers ?? {}).length >= 5);
 });
 
