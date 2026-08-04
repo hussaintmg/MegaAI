@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { apiGet, SessionExpired } from '@/lib/client';
 
 interface GoalRow {
   _id: string;
@@ -16,16 +17,17 @@ export default function DashboardPage() {
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [goal, setGoal] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/goals');
-      if (!res.ok) return;
-      const data = (await res.json()) as { goals: GoalRow[] };
+      const data = await apiGet<{ goals: GoalRow[] }>('/api/goals');
       setGoals(data.goals);
-    } catch {
-      /* transient */
+      setLoadError('');
+    } catch (err) {
+      if (err instanceof SessionExpired) return; // redirecting to /login
+      setLoadError(err instanceof Error ? err.message : 'could not load goals');
     }
   }, []);
 
@@ -96,6 +98,7 @@ export default function DashboardPage() {
 
       <div className="panel">
         <h2>Goals</h2>
+        {loadError && <div className="msg err" style={{ marginLeft: 0, marginBottom: 10 }}>{loadError}</div>}
         {goals.length === 0 ? (
           <div className="muted">No goals yet — submit one above.</div>
         ) : (

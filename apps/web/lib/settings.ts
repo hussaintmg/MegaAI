@@ -66,10 +66,18 @@ export function mergeSettings(existing: SettingsDoc, body: Record<string, unknow
   }
 
   if (Array.isArray(body.fallbackChain)) {
-    merged.fallbackChain = body.fallbackChain
-      .filter((k): k is string => typeof k === 'string' && k.trim().length > 0)
-      .map((k) => k.trim())
-      .slice(0, 10);
+    // Only real provider kinds may enter the chain: the engine rejects its
+    // whole config when the chain names a provider that does not exist, which
+    // would fail every run at boot. Unknown names are dropped, and an empty
+    // result falls back to a chain that always works.
+    const allowed = new Set<string>([...PROVIDER_KINDS, 'mock']);
+    const chain = body.fallbackChain
+      .filter((k): k is string => typeof k === 'string')
+      .map((k) => k.trim().toLowerCase())
+      .filter((k) => allowed.has(k));
+    const deduped = [...new Set(chain)].slice(0, 10);
+    if (!deduped.includes('mock')) deduped.push('mock');
+    merged.fallbackChain = deduped;
   }
   if (body.planner === 'model' || body.planner === 'template') merged.planner = body.planner;
 

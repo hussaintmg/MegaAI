@@ -1,6 +1,7 @@
 /**
  * POST /api/cron — the scheduler tick, called by the GitHub Actions cron
- * workflow (executor token). Every due, enabled schedule becomes a goal run.
+ * workflow (executor token). Two jobs: reconcile goals whose runner died
+ * without reporting, then turn every due, enabled schedule into a goal run.
  */
 
 import { NextResponse } from 'next/server';
@@ -15,9 +16,24 @@ export async function POST(req: Request) {
   const db = await getDb();
   const schedules = db.collection('schedules');
   const now = new Date();
-  const due = await schedules.find({ enabled: true, nextRunAt: { $lte: now } }).limit(10).toArray();
-
   const goals = await goalsCollection();
+
+  // Reconcile goals whose runner died without reporting: nothing else ever
+  // moves them out of queued/dispatched/running, so without this sweep they
+  // would show as "live" forever in the dashboard.
+  const staleCutoff = new Date(now.getTime() - 90 * 60_000);
+  const stale = await goals.updateMany(
+    { status: { $in: ['queued', 'dispatched', 'running'] }, updatedAt: { $lte: staleCutoff } },
+    {
+      $set: {
+        status: 'failed',
+        error: 'No response from the GitHub Actions runner within 90 minutes — check the workflow run.',
+        updatedAt: now,
+      },
+    },
+  );
+
+  const due = await schedules.find({ enabled: true, nextRunAt: { $lte: now } }).limit(10).toArray();
   let dispatched = 0;
   const errors: string[] = [];
   for (const schedule of due) {
@@ -47,5 +63,5 @@ export async function POST(req: Request) {
       { $set: { lastRunAt: now, nextRunAt: new Date(Date.now() + Number(schedule.everyHours) * 3_600_000) } },
     );
   }
-  return NextResponse.json({ due: due.length, dispatched, errors });
+  return NextResponse.json({ due: due.length, dispatched, staleReconciled: stale.modifiedCount, errors });
 }

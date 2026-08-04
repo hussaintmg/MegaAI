@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { use, useCallback, useEffect, useRef, useState } from 'react';
+import { apiGet, SessionExpired } from '@/lib/client';
 
 interface GoalDetail {
   _id: string;
@@ -21,30 +22,33 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const [goal, setGoal] = useState<GoalDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const eventsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/goals/${id}`);
-      if (res.status === 404 || res.status === 400) {
-        setNotFound(true);
-        return;
-      }
-      if (!res.ok) return;
-      const data = (await res.json()) as { goal: GoalDetail };
+      const data = await apiGet<{ goal: GoalDetail }>(`/api/goals/${id}`);
       setGoal(data.goal);
-    } catch {
-      /* transient */
+      setLoadError('');
+    } catch (err) {
+      if (err instanceof SessionExpired) return; // redirecting to /login
+      const message = err instanceof Error ? err.message : 'could not load the goal';
+      if (/not found|invalid goal id/i.test(message)) setNotFound(true);
+      else setLoadError(message);
     }
   }, [id]);
 
+  // Poll only while the run is live; a finished goal never changes again.
+  const live = !goal || ACTIVE.has(goal.status);
+
   useEffect(() => {
     void load();
+    if (!live) return;
     const timer = setInterval(() => {
       void load();
     }, 3000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, live]);
 
   useEffect(() => {
     const el = eventsRef.current;
@@ -58,7 +62,18 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
       </div>
     );
   }
-  if (!goal) return <div className="panel muted">Loading…</div>;
+  if (!goal) {
+    return loadError ? (
+      <div className="panel">
+        <div className="msg err" style={{ marginLeft: 0 }}>{loadError}</div>
+        <div style={{ marginTop: 10 }}>
+          <Link href="/">Back to dashboard</Link>
+        </div>
+      </div>
+    ) : (
+      <div className="panel muted">Loading…</div>
+    );
+  }
 
   return (
     <>
@@ -74,6 +89,7 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
           {ACTIVE.has(goal.status) && ' · live'}
         </div>
         {goal.error && <div className="msg err" style={{ marginLeft: 0, marginTop: 8 }}>{goal.error}</div>}
+        {loadError && <div className="msg err" style={{ marginLeft: 0, marginTop: 8 }}>{loadError}</div>}
       </div>
 
       <div className="grid2">

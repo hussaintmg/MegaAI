@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { apiGet, SessionExpired } from '@/lib/client';
 
 interface ScheduleRow {
   _id: string;
@@ -21,10 +22,13 @@ export default function SchedulesPage() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/schedules');
-    if (!res.ok) return;
-    const data = (await res.json()) as { schedules: ScheduleRow[] };
-    setSchedules(data.schedules);
+    try {
+      const data = await apiGet<{ schedules: ScheduleRow[] }>('/api/schedules');
+      setSchedules(data.schedules);
+    } catch (err) {
+      if (err instanceof SessionExpired) return; // redirecting to /login
+      setMessage({ ok: false, text: err instanceof Error ? err.message : 'could not load schedules' });
+    }
   }, []);
 
   useEffect(() => {

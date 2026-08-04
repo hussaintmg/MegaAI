@@ -27,16 +27,25 @@ if (!PLATFORM_URL || !EXECUTOR_TOKEN || !GOAL_ID) {
 const headers = { authorization: `Bearer ${EXECUTOR_TOKEN}`, 'content-type': 'application/json' };
 const api = (path) => `${PLATFORM_URL}/api/executor/goals/${GOAL_ID}${path}`;
 
-async function postEvent(event, message) {
-  try {
-    await fetch(api('/events'), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ type: 'event', event, message: String(message).slice(0, 900) }),
-    });
-  } catch (err) {
-    console.error('executor: event post failed:', String(err));
-  }
+// Progress events are posted without awaiting (so they never slow the run
+// down), but every in-flight post is tracked here and drained before exit —
+// otherwise process.exit would discard the last few task updates.
+const pending = new Set();
+
+function postEvent(event, message) {
+  const promise = fetch(api('/events'), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ type: 'event', event, message: String(message).slice(0, 900) }),
+  })
+    .catch((err) => console.error('executor: event post failed:', String(err)))
+    .finally(() => pending.delete(promise));
+  pending.add(promise);
+  return promise;
+}
+
+async function drainEvents() {
+  while (pending.size > 0) await Promise.allSettled([...pending]);
 }
 
 async function postFinal(payload) {
@@ -121,14 +130,17 @@ async function main() {
   megaai.bus.on(Events.TaskUpdated, (event) => {
     const task = event.payload?.task;
     if (!task) return;
-    if (task.state === 'in-progress') void postEvent('task', `▶ ${task.title} (${task.agentKind})`);
-    else if (task.state === 'completed') void postEvent('task', `✔ ${task.title}`);
-    else if (task.state === 'failed' || task.state === 'blocked') void postEvent('task', `✖ ${task.title} (${task.state})`);
+    if (task.state === 'in-progress') postEvent('task', `▶ ${task.title} (${task.agentKind})`);
+    else if (task.state === 'completed') postEvent('task', `✔ ${task.title}`);
+    else if (task.state === 'failed' || task.state === 'blocked') postEvent('task', `✖ ${task.title} (${task.state})`);
   });
 
   // 3. Run the goal.
   const result = await megaai.submitGoal(goal);
   const ok = result.project.status === 'completed';
+  // Flush queued progress events before the final report so the dashboard
+  // timeline is complete and in order.
+  await drainEvents();
 
   let report;
   const reportPath = join(result.workspaceDir, 'MEGAAI_REPORT.md');
@@ -152,6 +164,7 @@ async function main() {
 main().catch(async (err) => {
   const message = err instanceof Error ? err.message : String(err);
   console.error('executor: fatal:', message);
+  await drainEvents().catch(() => undefined);
   await postFinal({ status: 'failed', error: message }).catch(() => undefined);
   process.exit(1);
 });

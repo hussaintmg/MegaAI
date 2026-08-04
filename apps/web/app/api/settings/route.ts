@@ -5,12 +5,14 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin, requireUser } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
 import { loadSettingsDoc, mergeSettings, redactSettings, saveSettingsDoc } from '@/lib/settings';
 
+// Admin-only both ways: even masked keys and the email transport config are
+// operator secrets, so a member must not be able to read them.
 export async function GET() {
-  const session = await requireUser();
-  if (!session) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'admin only' }, { status: 403 });
   const doc = await loadSettingsDoc();
   return NextResponse.json({ settings: redactSettings(doc) });
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { apiGet, SessionExpired } from '@/lib/client';
 
 interface UserRow {
   _id: string;
@@ -20,14 +21,15 @@ export default function UsersPage() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/users');
-    if (res.status === 403) {
-      setDenied(true);
-      return;
+    try {
+      const data = await apiGet<{ users: UserRow[] }>('/api/users');
+      setUsers(data.users);
+    } catch (err) {
+      if (err instanceof SessionExpired) return; // redirecting to /login
+      const text = err instanceof Error ? err.message : 'could not load users';
+      if (/admin only/i.test(text)) setDenied(true);
+      else setMessage({ ok: false, text });
     }
-    if (!res.ok) return;
-    const data = (await res.json()) as { users: UserRow[] };
-    setUsers(data.users);
   }, []);
 
   useEffect(() => {

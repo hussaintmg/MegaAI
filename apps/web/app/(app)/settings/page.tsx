@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiGet, SessionExpired } from '@/lib/client';
 
 const KINDS = ['anthropic', 'openai', 'gemini', 'openrouter', 'groq'] as const;
 const LABELS: Record<string, string> = {
@@ -31,23 +32,34 @@ export default function SettingsPage() {
   const [emailKey, setEmailKey] = useState('');
   const [fallback, setFallback] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   async function load() {
-    const res = await fetch('/api/settings');
-    if (!res.ok) return;
-    const data = (await res.json()) as { settings: SettingsView };
-    setSettings(data.settings);
-    setFallback(data.settings.fallbackChain.join(', '));
-    setKeys({});
-    setEmailKey('');
+    try {
+      const data = await apiGet<{ settings: SettingsView }>('/api/settings');
+      setSettings(data.settings);
+      setFallback(data.settings.fallbackChain.join(', '));
+      setKeys({});
+      setEmailKey('');
+      setLoadError('');
+    } catch (err) {
+      if (err instanceof SessionExpired) return; // redirecting to /login
+      setLoadError(err instanceof Error ? err.message : 'could not load settings');
+    }
   }
 
   useEffect(() => {
     void load();
   }, []);
 
-  if (!settings) return <div className="panel muted">Loading…</div>;
+  if (!settings) {
+    return (
+      <div className="panel">
+        {loadError ? <div className="msg err" style={{ marginLeft: 0 }}>{loadError}</div> : <span className="muted">Loading…</span>}
+      </div>
+    );
+  }
 
   function setProvider(kind: string, patch: Partial<ProviderView>) {
     setSettings((prev) =>

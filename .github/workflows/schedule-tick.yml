@@ -22,7 +22,9 @@ jobs:
             echo "PLATFORM_URL / EXECUTOR_TOKEN secrets not set — skipping."
             exit 0
           fi
-          curl -sS -X POST "$PLATFORM_URL/api/cron" \
+          # --fail-with-body: a 401/500 must turn this run red, otherwise the
+          # platform's clock could die silently while the workflow stays green.
+          curl -sS --fail-with-body -X POST "$PLATFORM_URL/api/cron" \
             -H "authorization: Bearer $EXECUTOR_TOKEN" \
             -H "content-type: application/json" \
             --max-time 60 \

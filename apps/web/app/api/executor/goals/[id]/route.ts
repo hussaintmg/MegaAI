@@ -20,7 +20,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const goal = await goals.findOne({ _id: objectId });
   if (!goal) return NextResponse.json({ error: 'goal not found' }, { status: 404 });
 
-  await goals.updateOne({ _id: objectId }, { $set: { status: 'running', updatedAt: new Date() } });
+  // Guarded transition: only a goal that is still waiting or already running
+  // may be picked up. A GitHub Actions "Re-run job" on a finished goal would
+  // otherwise flip a completed delivery back to running and lose its result.
+  if (!['queued', 'dispatched', 'running'].includes(goal.status)) {
+    return NextResponse.json({ error: `goal is already ${goal.status}` }, { status: 409 });
+  }
+  await goals.updateOne(
+    { _id: objectId, status: { $in: ['queued', 'dispatched', 'running'] } },
+    { $set: { status: 'running', updatedAt: new Date() } },
+  );
   await pushGoalEvent(objectId, 'running', 'Runner picked up the goal');
 
   const settings = await loadSettingsDoc();
