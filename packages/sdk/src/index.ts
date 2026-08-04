@@ -169,6 +169,32 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   if (geminiConfig?.enabled) {
     providers.register(new GeminiProvider({ apiKey: geminiConfig.apiKey, model: geminiConfig.model }));
   }
+  // OpenRouter and Groq both speak the OpenAI chat-completions wire protocol,
+  // so they reuse the OpenAI-compatible adapter with their own base URL + kind.
+  const openrouterConfig = providerConfigs.openrouter;
+  if (openrouterConfig?.enabled) {
+    providers.register(
+      new OpenAICompatProvider({
+        kind: 'openrouter',
+        name: 'OpenRouter',
+        apiKey: openrouterConfig.apiKey,
+        model: openrouterConfig.model ?? 'openai/gpt-4o-mini',
+        baseURL: 'https://openrouter.ai/api',
+      }),
+    );
+  }
+  const groqConfig = providerConfigs.groq;
+  if (groqConfig?.enabled) {
+    providers.register(
+      new OpenAICompatProvider({
+        kind: 'groq',
+        name: 'Groq',
+        apiKey: groqConfig.apiKey,
+        model: groqConfig.model ?? 'llama-3.3-70b-versatile',
+        baseURL: 'https://api.groq.com/openai',
+      }),
+    );
+  }
   for (const provider of options.extraProviders ?? []) providers.register(provider);
 
   const limits = new LimitTracker(clock);
@@ -265,7 +291,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   // composes and captures the RFC5322 message offline.
   if (config.comm.email.from) {
     const emailTransport = config.comm.email.apiUrl
-      ? createHttpEmailTransport(config.comm.email.apiUrl, { allowedHosts: config.comm.email.allowedHosts })
+      ? createHttpEmailTransport(config.comm.email.apiUrl, { allowedHosts: config.comm.email.allowedHosts, apiKey: config.comm.email.apiKey || undefined })
       : config.comm.email.smtpHost
         ? createSmtpTransport({ host: config.comm.email.smtpHost })
         : undefined;

@@ -56,6 +56,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   <h1>MEGA<span style="color:var(--accent)">AI</span></h1>
   <span style="color:var(--muted)" id="subtitle">autonomous delivery team</span>
   <div class="spacer"></div>
+  <a href="/settings" style="color:var(--accent);text-decoration:none;margin-right:12px">⚙ Settings</a>
   <span class="chip off" id="pressureChip">pressure: …</span>
 </header>
 <main>

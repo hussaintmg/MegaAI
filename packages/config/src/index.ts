@@ -92,6 +92,8 @@ export interface MegaConfig {
       to: string;
       /** HTTP email-API endpoint (SendGrid/Postmark-style) to POST to. */
       apiUrl: string;
+      /** Bearer token / API key for the email API (sent as Authorization). */
+      apiKey: string;
       /** SMTP host (uses the optional nodemailer transport when set). */
       smtpHost: string;
       allowedHosts: string[];
@@ -112,12 +114,14 @@ export function defaultConfig(): MegaConfig {
     },
     logging: { level: 'info', pretty: true },
     ai: {
-      fallbackChain: ['anthropic', 'openai', 'gemini', 'mock'],
+      fallbackChain: ['anthropic', 'openai', 'gemini', 'openrouter', 'groq', 'mock'],
       maxTokens: 16_000,
       providers: {
         anthropic: { enabled: true, model: 'claude-opus-5', requestsPerMinute: 50 },
         openai: { enabled: true, requestsPerMinute: 50 },
-        gemini: { enabled: true, requestsPerMinute: 50 },
+        gemini: { enabled: true, model: 'gemini-2.5-flash', requestsPerMinute: 50 },
+        openrouter: { enabled: true, model: 'openai/gpt-4o-mini', requestsPerMinute: 50 },
+        groq: { enabled: true, model: 'llama-3.3-70b-versatile', requestsPerMinute: 50 },
         mock: { enabled: true },
       },
     },
@@ -159,7 +163,7 @@ export function defaultConfig(): MegaConfig {
         'workflow.approval.requested',
         'planning.project.completed',
       ],
-      email: { from: '', to: '', apiUrl: '', smtpHost: '', allowedHosts: [] },
+      email: { from: '', to: '', apiUrl: '', apiKey: '', smtpHost: '', allowedHosts: [] },
     },
     meta: { planner: 'template' },
   };
@@ -198,6 +202,8 @@ function envOverrides(env: NodeJS.ProcessEnv): JsonObject {
   if (env.ANTHROPIC_API_KEY) setPath(['ai', 'providers', 'anthropic', 'apiKey'], env.ANTHROPIC_API_KEY);
   if (env.OPENAI_API_KEY) setPath(['ai', 'providers', 'openai', 'apiKey'], env.OPENAI_API_KEY);
   if (env.GEMINI_API_KEY) setPath(['ai', 'providers', 'gemini', 'apiKey'], env.GEMINI_API_KEY);
+  if (env.OPENROUTER_API_KEY) setPath(['ai', 'providers', 'openrouter', 'apiKey'], env.OPENROUTER_API_KEY);
+  if (env.GROQ_API_KEY) setPath(['ai', 'providers', 'groq', 'apiKey'], env.GROQ_API_KEY);
   return out;
 }
 

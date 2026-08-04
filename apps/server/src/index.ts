@@ -18,10 +18,28 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import process from 'node:process';
-import { createMegaAI } from '@megaai/sdk';
+import { createMegaAI, loadConfig, type MegaAI } from '@megaai/sdk';
 import { DASHBOARD_HTML } from './dashboard.js';
+import { SETTINGS_HTML } from './settings-page.js';
+import { loadSettings, mergeSettings, parseIncoming, redactSettings, saveSettings, settingsToOverrides } from './settings.js';
 
-const megaai = createMegaAI();
+// Where runtime settings live (provider keys, fallback, email). Resolved once
+// so both boot and live-reload read from the same place.
+const dataDir = loadConfig().system.dataDir;
+
+function build(): MegaAI {
+  return createMegaAI({ configOverrides: settingsToOverrides(loadSettings(dataDir)) });
+}
+
+// A mutable holder so saving settings can rebuild the engine in place; every
+// request handler reads the current instance through this binding.
+let megaai = build();
+
+async function rebuild(): Promise<void> {
+  await megaai.stop();
+  megaai = build();
+  await megaai.start();
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body, null, 2);
@@ -48,6 +66,40 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (method === 'GET' && (path === '/' || path === '/index.html')) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(DASHBOARD_HTML);
+    return;
+  }
+
+  if (method === 'GET' && path === '/settings') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(SETTINGS_HTML);
+    return;
+  }
+
+  if (method === 'GET' && path === '/api/settings') {
+    json(res, 200, {
+      settings: redactSettings(loadSettings(dataDir)),
+      providerStatus: megaai.sessions.providerStatus(),
+      fallbackChain: megaai.config.ai.fallbackChain,
+      emailChannel: megaai.comm.has('email'),
+    });
+    return;
+  }
+
+  if (method === 'POST' && path === '/api/settings') {
+    const body = await readBody(req);
+    const merged = mergeSettings(loadSettings(dataDir), parseIncoming(body));
+    saveSettings(dataDir, merged);
+    try {
+      await rebuild();
+    } catch (err) {
+      json(res, 500, { ok: false, error: `settings saved but engine restart failed: ${String(err)}` });
+      return;
+    }
+    json(res, 200, {
+      ok: true,
+      settings: redactSettings(merged),
+      configured: megaai.sessions.providerStatus().filter((p) => p.configured).map((p) => p.kind),
+    });
     return;
   }
 

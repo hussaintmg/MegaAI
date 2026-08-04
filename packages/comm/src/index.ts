@@ -198,19 +198,24 @@ export class EmailChannel implements Channel {
 }
 
 /** Deliver email by POSTing to an HTTP email API (SendGrid/Postmark-style). Host-allowlisted. */
-export function createHttpEmailTransport(url: string, options: { allowedHosts?: string[]; timeoutMs?: number } = {}): EmailTransport {
+export function createHttpEmailTransport(
+  url: string,
+  options: { allowedHosts?: string[]; timeoutMs?: number; apiKey?: string; headers?: Record<string, string> } = {},
+): EmailTransport {
   const host = new URL(url).hostname;
   const allowed = options.allowedHosts ?? [];
   if (allowed.length > 0 && !allowed.some((h) => host === h || host.endsWith(`.${h}`))) {
     throw new MegaError('PERMISSION_DENIED', `Email API host "${host}" is not on the comm allowlist`);
   }
+  const headers: Record<string, string> = { 'content-type': 'application/json', ...options.headers };
+  if (options.apiKey) headers.authorization = `Bearer ${options.apiKey}`;
   return async (envelope) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify({ from: envelope.from, to: envelope.to, subject: envelope.subject, text: envelope.text }),
         signal: controller.signal,
       });

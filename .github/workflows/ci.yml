@@ -19,6 +19,6 @@ jobs:
       - name: Build
         run: npm run build
       - name: Test
-        run: node --test "packages/**/*.test.js"
+        run: node --test "packages/**/*.test.js" "apps/**/*.test.js"
       - name: Demo (end-to-end smoke test)
         run: node apps/cli/dist/index.js demo --quiet

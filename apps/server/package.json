@@ -18,7 +18,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@megaai/sdk": "0.1.0"
+    "@megaai/sdk": "0.1.0",
+    "@megaai/types": "0.1.0"
   },
   "license": "MIT"
 }
