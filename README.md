@@ -199,8 +199,29 @@ node apps/cli/dist/index.js train
 Training is deterministic (seeded PRNG) and each model reports **held-out**
 accuracy. Trained models persist to `.megaai/models/`; the SDK loads them on
 boot (the UI-purpose model then replaces the vision heuristic) and exposes
-them through the `model.predict` tool. Heavy deep-vision models can register
-later through the same `PredictiveModel` seam.
+them through the `model.predict` tool.
+
+### Deep vision — seeing the screen
+
+Three trained ONNX models go further, working from **pixels alone** with no DOM:
+
+| Model | Task | Held-out |
+| --- | --- | --- |
+| `ui-detector` (YOLO11) | screenshot → every element with a box | **mAP50 0.936** |
+| `screen-classifier` | screenshot → page kind (login/checkout/…) | **99.0%** |
+| `ui-defect-detector` | screenshot → visual defect (overflow/overlap/…) | **88.4%** |
+
+They train on a dataset MegaAI **generates itself** — synthetic pages rendered
+in headless Chromium with boxes read from the DOM, so labels are exact and no
+annotation is needed:
+
+```bash
+npm run dataset -- --count 3000        # 3000 pages, ~39k labelled boxes
+```
+
+Drop the weights into `.megaai/models/` and `desktop.observe({ pixels: true })`
+finds elements from the screenshot. Details, per-class results and the dataset
+bugs the training exposed: **[docs/TRAINED-MODELS.md](./docs/TRAINED-MODELS.md)**.
 
 ## Packages
 
