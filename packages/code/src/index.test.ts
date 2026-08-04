@@ -85,3 +85,132 @@ test('git tools work through the tool contract and stay in the workspace', async
     cleanup();
   }
 });
+
+test('branches: create, list, checkout', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+    assert.equal(await engine.currentBranch(dir), 'main');
+
+    await engine.createBranch(dir, 'feature/x');
+    assert.equal(await engine.currentBranch(dir), 'feature/x');
+
+    const branches = await engine.listBranches(dir);
+    assert.deepEqual(
+      branches.map((b) => b.name).sort(),
+      ['feature/x', 'main'],
+    );
+    assert.deepEqual(
+      branches.filter((b) => b.current).map((b) => b.name),
+      ['feature/x'],
+    );
+
+    await engine.checkout(dir, 'main');
+    assert.equal(await engine.currentBranch(dir), 'main');
+
+    await assert.rejects(engine.checkout(dir, 'does-not-exist'), /git checkout failed/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge: fast case succeeds, conflicting case aborts cleanly', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'shared.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+
+    await engine.createBranch(dir, 'feature');
+    writeFileSync(join(dir, 'feature-only.txt'), 'new\n');
+    await engine.commitAll(dir, 'feature work');
+    await engine.checkout(dir, 'main');
+
+    const clean = await engine.merge(dir, 'feature');
+    assert.equal(clean.merged, true);
+    assert.equal(clean.conflict, false);
+    assert.ok(clean.sha);
+
+    // Now create a genuine conflict.
+    await engine.createBranch(dir, 'conflict-a');
+    writeFileSync(join(dir, 'shared.txt'), 'from a\n');
+    await engine.commitAll(dir, 'change on a');
+    await engine.checkout(dir, 'main');
+    writeFileSync(join(dir, 'shared.txt'), 'from main\n');
+    await engine.commitAll(dir, 'change on main');
+
+    const conflicted = await engine.merge(dir, 'conflict-a');
+    assert.equal(conflicted.merged, false);
+    assert.equal(conflicted.conflict, true);
+    // Merge was aborted, so the workspace is clean and back on main.
+    assert.deepEqual(await engine.status(dir), []);
+    assert.equal(await engine.currentBranch(dir), 'main');
+  } finally {
+    cleanup();
+  }
+});
+
+test('push: publishes the current branch to a local remote', async () => {
+  const { dir: remoteDir, cleanup: cleanupRemote } = workspace();
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    const bare = await engine.run(remoteDir, ['init', '--bare']);
+    assert.equal(bare.exitCode, 0);
+
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+
+    const result = await engine.push(dir, { remoteUrl: remoteDir, setUpstream: true });
+    assert.equal(result.exitCode, 0);
+
+    const clone = await engine.run(remoteDir, ['log', '--oneline', '--all']);
+    assert.match(clone.stdout, /base/);
+  } finally {
+    cleanup();
+    cleanupRemote();
+  }
+});
+
+test('git tools expose branch, checkout, merge and push', async () => {
+  const { dir: remoteDir, cleanup: cleanupRemote } = workspace();
+  const { dir, cleanup } = workspace();
+  try {
+    const [, , , , branch, checkout, merge, push] = createGitTools();
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    const [commit] = createGitTools();
+    await commit!.execute({ message: 'base' }, { workspaceRoot: dir });
+
+    const created = (await branch!.execute({ name: 'feature' }, { workspaceRoot: dir })) as {
+      created: boolean;
+      branch: string;
+    };
+    assert.equal(created.created, true);
+    assert.equal(created.branch, 'feature');
+
+    const listed = (await branch!.execute({}, { workspaceRoot: dir })) as {
+      branches: Array<{ name: string; current: boolean }>;
+    };
+    assert.ok(listed.branches.some((b) => b.name === 'feature' && b.current));
+
+    await checkout!.execute({ branch: 'main' }, { workspaceRoot: dir });
+    const mergeResult = (await merge!.execute({ branch: 'feature' }, { workspaceRoot: dir })) as {
+      merged: boolean;
+    };
+    assert.equal(mergeResult.merged, true);
+
+    const bare = new GitEngine();
+    const bareInit = await bare.run(remoteDir, ['init', '--bare']);
+    assert.equal(bareInit.exitCode, 0);
+    const pushed = (await push!.execute(
+      { remoteUrl: remoteDir, setUpstream: true },
+      { workspaceRoot: dir },
+    )) as { pushed: boolean };
+    assert.equal(pushed.pushed, true);
+  } finally {
+    cleanup();
+    cleanupRemote();
+  }
+});
