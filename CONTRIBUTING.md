@@ -14,7 +14,7 @@ Node.js ≥ 20 required. No other system dependencies.
 ## Repository layout
 
 ```
-packages/   23 packages, one responsibility each (see ARCHITECTURE.md)
+packages/   27 packages, one responsibility each (see ARCHITECTURE.md)
 apps/       cli (megaai command) · server (REST + dashboard)
 docs/       VISION.md and supporting documents
 scripts/    repo maintenance (clean)

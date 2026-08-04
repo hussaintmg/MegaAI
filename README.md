@@ -52,7 +52,7 @@ flowchart TB
     ORC --> WF[Workflow Engine<br/>steps · retries · checkpoints · approvals]
     WF --> POL[Policy Engine<br/>rules · time windows · approvals]
     ORC --> AR[Agent Runtime<br/>spawn · heartbeat · recover]
-    AR --> AG[Agents<br/>coding · testing · review · research<br/>docs · marketing · crm · devops · architecture]
+    AR --> AG[Agents · 12 kinds<br/>coding · testing · build · review · research · browser<br/>docs · marketing · crm · devops · architecture · support]
     AG --> CTX[Context Engine] --> MEM[Memory + Knowledge<br/>vector search]
     AG --> PR[Prompt Engine]
     AG --> AI[AI Session Manager<br/>fallback: anthropic → openai → gemini → mock]
@@ -161,7 +161,8 @@ every action lands in the audit log.
 | Core runtime | `runtime` (DI, lifecycle, health, metrics, scheduler) · `resources` |
 | AI layer | `ai` (providers, models, limits, sessions, fallback) |
 | Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` |
-| Intelligence | `agents` · `meta-brain` · `orchestrator` |
+| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + notifications) |
+| Intelligence | `agents` (12 kinds) · `meta-brain` (template + model planning) · `orchestrator` |
 | Surface | `sdk` · `apps/cli` · `apps/server` |
 
 ## Extending MegaAI
@@ -196,7 +197,7 @@ distributed workers, and the plugin marketplace.
 ## Development
 
 ```bash
-npm run build     # tsc -b across all 25 workspaces
+npm run build     # tsc -b across all 29 workspaces
 npm test          # build + 73 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
@@ -213,7 +214,7 @@ are all in and tested. Phase 4 has begun with model-backed planning
 what's next (desktop/vision automation, semantic memory, distributed workers,
 the plugin marketplace) — all building on the contracts already in place.
 
-**28 packages · 97 tests · fully offline demo.**
+**29 workspaces (27 packages + 2 apps) · 97 tests · fully offline demo.**
 
 ## License
 

@@ -1,6 +1,6 @@
 # MegaAI Architecture
 
-MegaAI is a layered monorepo: 23 packages + 2 apps, each with a single
+MegaAI is a layered monorepo: 27 packages + 2 apps, each with a single
 responsibility, talking to each other only through the data shapes in
 `@megaai/types` and the interfaces in `@megaai/contracts`. Lower layers never
 import higher ones; the dependency graph is a strict DAG enforced by
@@ -103,7 +103,7 @@ system like this:
 | `browser` | Browser automation: pluggable driver (offline simulator + optional Playwright), `browser.*` tools gated on `net.browser` | `BrowserEngine`, `SimulatedDriver`, `createBrowserTools` |
 | `deploy` | Deployment engine: pure `deploy.plan` + approval-gated `deploy.execute`; simulated by default, Docker/Vercel/Railway adapters | `DeployEngine`, `createDeployTools` |
 | `comm` | Communication engine: channels (captured/webhook), `comm.send` tool (gated), event-driven `NotificationEngine` for operator updates | `CommEngine`, `NotificationEngine`, `createCommTool` |
-| `agents` | Supervised agent lifecycle + 9 built-in agent kinds | `AgentRuntime`, `ModelDrivenAgent` |
+| `agents` | Supervised agent lifecycle + 12 built-in agent kinds (coding, testing, build, review, research, browser, documentation, marketing, crm, devops, architecture, support) | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan generation (templates or model-backed via `makePlan`), decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan`, `parsePlanSpec` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |
 | `sdk` | `createMegaAI()` composition root + re-exports | `createMegaAI` |
