@@ -43,6 +43,107 @@ def notebook(cells):
     }
 
 
+CANONICAL_CLASSES = "['button','input','link','checkbox','radio','select','textarea','image','heading','nav']"
+
+# Downloads a public detection dataset and folds it into ours. Source class
+# names differ per dataset, so everything is normalised onto our canonical
+# list; anything that has no sensible equivalent is dropped rather than guessed.
+ROBOFLOW_CELL = '''
+# ── Optional: add a public dataset on top of our generated one ───────────────
+#
+# Our synthetic pages give perfect labels; real-world screenshots add the messy
+# variety no generator invents (real fonts, ads, photos, odd layouts). Training
+# on BOTH is what makes the detector generalise.
+#
+# To use this: make a free roboflow.com account -> Settings -> API key, paste it
+# below. Leave ROBOFLOW_API_KEY empty to train on our dataset alone.
+
+ROBOFLOW_API_KEY = ""          # <-- paste your key here (stays in your Colab session)
+ROBOFLOW_WORKSPACE = "roboflow-gw7yv"
+ROBOFLOW_PROJECT   = "website-screenshots"
+ROBOFLOW_VERSION   = 1
+
+# Map a source dataset's class names onto ours. Unlisted names are dropped.
+ALIASES = {
+    "button":   ["button", "btn", "submit", "action bar", "actionbar"],
+    "input":    ["input", "field", "edittext", "textfield", "text field", "searchbar", "search bar", "search"],
+    "link":     ["link", "anchor", "hyperlink"],
+    "checkbox": ["checkbox", "check box", "tick box", "switch", "toggle"],
+    "radio":    ["radio", "radiobutton", "radio button"],
+    "select":   ["select", "dropdown", "drop down", "spinner", "combobox", "picker"],
+    "textarea": ["textarea", "text area", "multiline"],
+    "image":    ["image", "img", "icon", "picture", "photo", "thumbnail", "iframe", "video", "logo"],
+    "heading":  ["heading", "title", "header", "h1", "h2"],
+    "nav":      ["nav", "navbar", "navigation", "menu", "toolbar", "tab bar", "tabbar", "multitab", "tabs", "breadcrumb"],
+}
+
+def to_canonical(name):
+    """Source class name -> our class index, or None to drop it."""
+    n = str(name).strip().lower().replace("_", " ").replace("-", " ")
+    for canon, words in ALIASES.items():
+        if n in words:
+            return CLASSES.index(canon)
+    for canon, words in ALIASES.items():
+        if any(w in n for w in words):
+            return CLASSES.index(canon)
+    return None
+
+if ROBOFLOW_API_KEY:
+    import shutil, glob, subprocess, sys, yaml
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "roboflow"], check=False)
+    from roboflow import Roboflow
+
+    rf = Roboflow(api_key=ROBOFLOW_API_KEY)
+    project = rf.workspace(ROBOFLOW_WORKSPACE).project(ROBOFLOW_PROJECT)
+    extra = project.version(ROBOFLOW_VERSION).download("yolov8", location="/content/extra")
+
+    src_root = extra.location
+    src_names = yaml.safe_load(open(os.path.join(src_root, "data.yaml")))["names"]
+    if isinstance(src_names, dict):
+        src_names = [src_names[k] for k in sorted(src_names)]
+    print("source classes:", src_names)
+
+    remap = {i: to_canonical(n) for i, n in enumerate(src_names)}
+    kept = {src_names[i]: CLASSES[v] for i, v in remap.items() if v is not None}
+    dropped = [src_names[i] for i, v in remap.items() if v is None]
+    print("mapped :", kept)
+    print("dropped:", dropped)
+
+    added = 0
+    for split in ["train", "valid", "val", "test"]:
+        img_dir = os.path.join(src_root, split, "images")
+        lab_dir = os.path.join(src_root, split, "labels")
+        if not os.path.isdir(img_dir):
+            continue
+        target = "val" if split in ("valid", "val") else "train"
+        for img_path in glob.glob(os.path.join(img_dir, "*")):
+            base = os.path.splitext(os.path.basename(img_path))[0]
+            lab_path = os.path.join(lab_dir, base + ".txt")
+            if not os.path.exists(lab_path):
+                continue
+            lines = []
+            for line in open(lab_path):
+                p = line.split()
+                if len(p) < 5:
+                    continue
+                new_id = remap.get(int(p[0]))
+                if new_id is None:
+                    continue
+                lines.append(" ".join([str(new_id)] + p[1:5]))
+            if not lines:          # nothing of interest survived the remap
+                continue
+            name = "rf_" + base
+            shutil.copy(img_path, os.path.join(root, "images", target,
+                                               name + os.path.splitext(img_path)[1]))
+            open(os.path.join(root, "labels", target, name + ".txt"), "w").write("\\n".join(lines) + "\\n")
+            added += 1
+    print(f"\\nmerged {added} real-world images into the dataset")
+    print("train:", len(os.listdir(os.path.join(root, "images/train"))),
+          "| val:", len(os.listdir(os.path.join(root, "images/val"))))
+else:
+    print("No Roboflow key set — training on our generated dataset only (this works fine).")
+'''
+
 UPLOAD_CELL = '''
 # Upload the dataset.zip produced by:
 #   node scripts/dataset/generate-ui-dataset.mjs --count 3000 --out dataset
@@ -67,7 +168,13 @@ for base, dirs, fs in os.walk("."):
         root = os.path.abspath(base)
         break
 assert root, "Could not find the dataset (no data.yaml with an images/ folder)"
+
+import yaml
+_names = yaml.safe_load(open(os.path.join(root, "data.yaml")))["names"]
+CLASSES = [_names[i] for i in sorted(_names)] if isinstance(_names, dict) else list(_names)
+
 print("dataset root:", root)
+print("classes     :", CLASSES)
 print("train images:", len(os.listdir(os.path.join(root, "images/train"))))
 print("val images:  ", len(os.listdir(os.path.join(root, "images/val"))))
 '''
@@ -108,10 +215,7 @@ UI_DETECTOR = notebook([
     code('''
 import os, random
 from PIL import Image, ImageDraw
-import yaml
 
-names = yaml.safe_load(open(os.path.join(root, "data.yaml")))["names"]
-CLASSES = [names[i] for i in sorted(names)]
 colors = ["#ff3b30","#34c759","#007aff","#ff9500","#af52de","#00c7be","#ffcc00","#ff2d55","#5856d6","#8e8e93"]
 
 f = random.choice(os.listdir(os.path.join(root, "images/train")))
@@ -126,7 +230,15 @@ for line in open(os.path.join(root, "labels/train", f.replace(".png", ".txt"))):
 print(f, "|", CLASSES)
 im
 '''),
-    md("## 3. Train", "", "`epochs` and `imgsz` are the knobs: raise epochs for accuracy, lower imgsz for speed."),
+    md(
+        "## 3. Optional — mix in a real-world dataset",
+        "",
+        "Our generated pages give perfect labels; public screenshots add the messy variety a",
+        "generator never invents. Training on **both** is what makes the detector generalise to",
+        "real websites. Paste a free Roboflow API key below, or skip this cell entirely.",
+    ),
+    code(ROBOFLOW_CELL),
+    md("## 4. Train", "", "`epochs` and `imgsz` are the knobs: raise epochs for accuracy, lower imgsz for speed."),
     code('''
 from ultralytics import YOLO
 
@@ -146,7 +258,7 @@ results = model.train(
     seed=42,
 )
 '''),
-    md("## 4. Evaluate on the held-out split"),
+    md("## 5. Evaluate on the held-out split"),
     code('''
 metrics = model.val()
 print("mAP50    :", round(float(metrics.box.map50), 4))
@@ -160,7 +272,7 @@ for i, name in enumerate(CLASSES):
     except Exception:
         pass
 '''),
-    md("## 5. See it predict", "", "Runs the trained model on a validation image it never trained on."),
+    md("## 6. See it predict", "", "Runs the trained model on a validation image it never trained on."),
     code('''
 import random
 val_dir = os.path.join(root, "images/val")
@@ -169,7 +281,7 @@ pred = model.predict(sample, conf=0.35, verbose=False)[0]
 print(f"{len(pred.boxes)} elements detected in {os.path.basename(sample)}")
 Image.fromarray(pred.plot()[:, :, ::-1])
 '''),
-    md("## 6. Export and download", "", "`.onnx` is what the Node engine loads — same weights, no Python needed at inference."),
+    md("## 7. Export and download", "", "`.onnx` is what the Node engine loads — same weights, no Python needed at inference."),
     code('''
 best = "megaai/ui-detector/weights/best.pt"
 model = YOLO(best)

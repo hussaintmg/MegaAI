@@ -45,6 +45,30 @@ Start with `--count 300` to see it work end to end; use `--count 3000`+ for a
 model you would actually ship. More images = better model, and it costs only
 time — there is no dataset to buy or label.
 
+### Step 1b — (optional, recommended) mix in a real-world dataset
+
+Our generated pages give **perfect labels**; public screenshots add the messy
+variety a generator never invents — real fonts, ads, photos, odd layouts.
+Training the detector on **both** is what makes it generalise to real websites.
+
+The `ui-detector` notebook has a cell for this. Get a free API key at
+[roboflow.com](https://roboflow.com) → *Settings → API key*, paste it into
+`ROBOFLOW_API_KEY`, and run the cell. It downloads the dataset **inside Colab**
+(your key never leaves your session), remaps its class names onto ours, drops
+anything with no equivalent, and merges it into the training set.
+
+Defaults to [`roboflow-gw7yv/website-screenshots`](https://universe.roboflow.com/roboflow-gw7yv/website-screenshots);
+point `ROBOFLOW_WORKSPACE` / `ROBOFLOW_PROJECT` / `ROBOFLOW_VERSION` at any
+other Roboflow detection dataset and the remapping still applies. Verified
+against two real datasets:
+
+| Source dataset | Mapped | Dropped |
+| --- | --- | --- |
+| `website-screenshots` | button, field→input, heading, iframe/image→image, link | label, text |
+| `ui-element-detect` (61 classes) | Action Bar/Button/ImageButton/TextButton→button, CheckBox/Switch→checkbox, DropDown/Spinner/NumberPicker→select, EditText/Input→input, Icon/Image/VideoView→image, RadioButton→radio, Toolbar/MultiTab→nav | Slider, Modal, Map, Chronometer, … |
+
+Leave the key empty to train on our dataset alone — that works fine too.
+
 ### Step 2 — train on Colab
 
 For each notebook:
