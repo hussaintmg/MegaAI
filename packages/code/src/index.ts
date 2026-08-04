@@ -1,15 +1,18 @@
 /**
- * @megaai/code — the code engine (Phase 3, milestone 1).
+ * @megaai/code — the code engine (Phase 3).
  *
  * Wraps git so every delivery workspace becomes a real repository:
  * initialised on first commit, versioned per delivery, inspectable through
- * status/log/diff. Exposed two ways — a `GitEngine` for trusted core code
- * (the orchestrator versions each finished delivery) and `git.*` tools so
- * agents can commit their own work through the action pipeline.
+ * status/log/diff, and now collaborative — branches, merges, and remote
+ * pushes. Exposed two ways — a `GitEngine` for trusted core code (the
+ * orchestrator versions each finished delivery) and `git.*` tools so agents
+ * can work with git through the action pipeline.
  *
  * Safety: commands run via execFile (no shell interpolation), always inside
- * the workspace, from a fixed subcommand set. Nothing here can push to a
- * remote — publishing stays a human-approved, Phase 3 deployment concern.
+ * the workspace, from a fixed subcommand set. Ref names are validated so
+ * they can't be mistaken for flags. Pushing to a remote is a distinct
+ * `git.push` permission the policy engine gates behind human approval by
+ * default — see `approvalRequiredPermissions` in `@megaai/config`.
  */
 
 import { execFile } from 'node:child_process';
@@ -21,6 +24,20 @@ import { MegaError } from '@megaai/types';
 import type { Tool } from '@megaai/contracts';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Conservative ref/remote name check: must not be empty, must not start
+ * with `-` (so it can never be misread as a flag), and only common ref
+ * characters are allowed. Rejects everything else rather than trying to
+ * enumerate every unsafe git ref rule.
+ */
+const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9/_.-]*$/;
+
+function assertSafeRef(name: string, what: string): void {
+  if (!SAFE_REF.test(name) || name.includes('..') || name.endsWith('.lock')) {
+    throw new MegaError('INVALID_INPUT', `Invalid ${what}: "${name}"`);
+  }
+}
 
 export interface GitResult {
   exitCode: number;
@@ -144,6 +161,78 @@ export class GitEngine {
     const result = await this.run(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
     return result.exitCode === 0 ? result.stdout.trim() : undefined;
   }
+
+  async listBranches(cwd: string): Promise<Array<{ name: string; current: boolean }>> {
+    if (!this.isRepo(cwd)) return [];
+    const result = await this.run(cwd, ['branch', '--list']);
+    if (result.exitCode !== 0) return [];
+    return result.stdout
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => ({ current: line.startsWith('*'), name: line.replace(/^\*?\s*/, '').trim() }));
+  }
+
+  /** Create a branch (optionally from a start point) without switching to it. */
+  async createBranch(cwd: string, name: string, from?: string): Promise<void> {
+    assertSafeRef(name, 'branch name');
+    if (from) assertSafeRef(from, 'start point');
+    if (!this.isRepo(cwd)) await this.init(cwd);
+    const args = from ? ['branch', name, from] : ['branch', name];
+    const result = await this.run(cwd, args);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git branch failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+  }
+
+  async checkout(cwd: string, branch: string, options: { create?: boolean } = {}): Promise<void> {
+    assertSafeRef(branch, 'branch name');
+    const args = options.create ? ['checkout', '-b', branch] : ['checkout', branch];
+    const result = await this.run(cwd, args);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git checkout failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+  }
+
+  /** Merge `branch` into the current branch. Returns false on conflicts (and aborts the merge). */
+  async merge(cwd: string, branch: string, options: { message?: string } = {}): Promise<{ merged: boolean; conflicted: string[] }> {
+    assertSafeRef(branch, 'branch name');
+    const args = ['merge', '--no-ff', branch];
+    if (options.message) args.push('-m', options.message);
+    const result = await this.run(cwd, args);
+    if (result.exitCode === 0) return { merged: true, conflicted: [] };
+
+    const status = await this.status(cwd);
+    const conflicted = status.filter((entry) => entry.state.includes('U')).map((entry) => entry.path);
+    if (conflicted.length > 0) {
+      await this.run(cwd, ['merge', '--abort']);
+    }
+    return { merged: false, conflicted };
+  }
+
+  /**
+   * Push a branch to a remote. Restricted to the `origin` remote and to
+   * plain (non-force) pushes — this is the one operation in the engine that
+   * reaches outside the local workspace, so callers gate it behind approval.
+   */
+  async push(cwd: string, branch: string, options: { remote?: string; setUpstream?: boolean } = {}): Promise<GitResult> {
+    const remote = options.remote ?? 'origin';
+    if (remote !== 'origin') {
+      throw new MegaError('PERMISSION_DENIED', 'Pushes are only allowed to the "origin" remote');
+    }
+    assertSafeRef(branch, 'branch name');
+    const args = options.setUpstream ? ['push', '-u', remote, branch] : ['push', remote, branch];
+    const result = await this.run(cwd, args);
+    if (result.exitCode !== 0) {
+      throw new MegaError('INTERNAL', `git push failed: ${(result.stderr || result.stdout).trim()}`);
+    }
+    return result;
+  }
+
+  async hasRemote(cwd: string, name = 'origin'): Promise<boolean> {
+    if (!this.isRepo(cwd)) return false;
+    const result = await this.run(cwd, ['remote']);
+    return result.stdout.split('\n').map((line) => line.trim()).includes(name);
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -200,5 +289,56 @@ export function createGitTools(engine: GitEngine = new GitEngine()): Tool[] {
       return { diff: await engine.diff(ctx.workspaceRoot, { staged: input.staged === true }) };
     },
   };
-  return [commit, status, log, diff];
+  const branch: Tool = {
+    name: 'git.branch',
+    description: 'List branches, or create a new one (optionally from a start point) without switching to it',
+    inputSchema: { name: 'string (optional; create this branch if given)', from: 'string (optional start point)' },
+    permissions: ['git.write'],
+    async execute(input, ctx) {
+      const name = typeof input.name === 'string' ? input.name : undefined;
+      if (!name) {
+        const branches = (await engine.listBranches(ctx.workspaceRoot)) as unknown as JsonValue;
+        const out: JsonValue = { branches };
+        return out;
+      }
+      const from = typeof input.from === 'string' ? input.from : undefined;
+      await engine.createBranch(ctx.workspaceRoot, name, from);
+      const out: JsonValue = { created: name };
+      return out;
+    },
+  };
+  const checkout: Tool = {
+    name: 'git.checkout',
+    description: 'Switch the workspace to a branch, optionally creating it first',
+    inputSchema: { branch: 'string', create: 'boolean (optional)' },
+    permissions: ['git.write'],
+    async execute(input, ctx) {
+      const branchName = str(input, 'branch');
+      await engine.checkout(ctx.workspaceRoot, branchName, { create: input.create === true });
+      return { branch: branchName };
+    },
+  };
+  const merge: Tool = {
+    name: 'git.merge',
+    description: 'Merge a branch into the current branch; aborts cleanly and reports conflicts instead of leaving one in progress',
+    inputSchema: { branch: 'string', message: 'string (optional commit message)' },
+    permissions: ['git.write'],
+    async execute(input, ctx) {
+      const message = typeof input.message === 'string' ? input.message : undefined;
+      const result = await engine.merge(ctx.workspaceRoot, str(input, 'branch'), { message });
+      return result as unknown as JsonValue;
+    },
+  };
+  const push: Tool = {
+    name: 'git.push',
+    description: 'Push a branch to the "origin" remote (approval-gated: reaches outside the local workspace)',
+    inputSchema: { branch: 'string', setUpstream: 'boolean (optional)' },
+    permissions: ['git.push'],
+    async execute(input, ctx) {
+      const branchName = str(input, 'branch');
+      await engine.push(ctx.workspaceRoot, branchName, { setUpstream: input.setUpstream === true });
+      return { pushed: branchName };
+    },
+  };
+  return [commit, status, log, diff, branch, checkout, merge, push];
 }

@@ -85,3 +85,104 @@ test('git tools work through the tool contract and stay in the workspace', async
     cleanup();
   }
 });
+
+test('branch, checkout and merge collaborate cleanly', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'base.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+    assert.equal(await engine.currentBranch(dir), 'main');
+
+    await engine.createBranch(dir, 'feature');
+    assert.deepEqual(
+      (await engine.listBranches(dir)).map((b) => b.name).sort(),
+      ['feature', 'main'],
+    );
+
+    await engine.checkout(dir, 'feature');
+    assert.equal(await engine.currentBranch(dir), 'feature');
+    writeFileSync(join(dir, 'feature.txt'), 'feature\n');
+    await engine.commitAll(dir, 'feature work');
+
+    await engine.checkout(dir, 'main');
+    const result = await engine.merge(dir, 'feature', { message: 'merge feature' });
+    assert.equal(result.merged, true);
+    assert.deepEqual(result.conflicted, []);
+    const messages = (await engine.log(dir)).map((c) => c.message);
+    assert.equal(messages[0], 'merge feature');
+    assert.deepEqual(new Set(messages), new Set(['merge feature', 'feature work', 'base']));
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge reports and cleans up conflicts instead of leaving one in progress', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'x.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+    await engine.createBranch(dir, 'feature');
+
+    writeFileSync(join(dir, 'x.txt'), 'main change\n');
+    await engine.commitAll(dir, 'main change');
+
+    await engine.checkout(dir, 'feature');
+    writeFileSync(join(dir, 'x.txt'), 'feature change\n');
+    await engine.commitAll(dir, 'feature change');
+    await engine.checkout(dir, 'main');
+
+    const result = await engine.merge(dir, 'feature');
+    assert.equal(result.merged, false);
+    assert.deepEqual(result.conflicted, ['x.txt']);
+    // Merge was aborted — workspace is clean, not stuck mid-merge.
+    assert.deepEqual(await engine.status(dir), []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('push refuses non-origin remotes and unsafe ref names', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+
+    await assert.rejects(engine.push(dir, 'main', { remote: 'not-origin' }), /origin/);
+    await assert.rejects(engine.createBranch(dir, '--evil'), /Invalid branch name/);
+    await assert.rejects(engine.checkout(dir, '-x'), /Invalid branch name/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('git.branch, git.checkout and git.merge tools work through the tool contract', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const [, , , , branchTool, checkoutTool, mergeTool] = createGitTools();
+    writeFileSync(join(dir, 'base.txt'), 'base\n');
+    const engine = new GitEngine();
+    await engine.commitAll(dir, 'base');
+
+    await branchTool!.execute({ name: 'feature' }, { workspaceRoot: dir });
+    const listed = (await branchTool!.execute({}, { workspaceRoot: dir })) as {
+      branches: Array<{ name: string }>;
+    };
+    assert.ok(listed.branches.some((b) => b.name === 'feature'));
+
+    await checkoutTool!.execute({ branch: 'feature' }, { workspaceRoot: dir });
+    assert.equal(await engine.currentBranch(dir), 'feature');
+    writeFileSync(join(dir, 'feature.txt'), 'feature\n');
+    await engine.commitAll(dir, 'feature work');
+
+    await checkoutTool!.execute({ branch: 'main' }, { workspaceRoot: dir });
+    const merged = (await mergeTool!.execute({ branch: 'feature' }, { workspaceRoot: dir })) as {
+      merged: boolean;
+    };
+    assert.equal(merged.merged, true);
+  } finally {
+    cleanup();
+  }
+});

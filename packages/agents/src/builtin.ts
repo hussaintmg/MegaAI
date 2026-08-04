@@ -68,7 +68,17 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     description: 'Implements features, writes and edits source code',
     systemPrompt:
       'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders. Commit finished work with git.commit.',
-    allowedTools: [...FS_TOOLS, 'fs.delete', 'shell.exec', 'git.commit', 'git.status', 'git.diff'],
+    allowedTools: [
+      ...FS_TOOLS,
+      'fs.delete',
+      'shell.exec',
+      'git.commit',
+      'git.status',
+      'git.diff',
+      'git.branch',
+      'git.checkout',
+      'git.merge',
+    ],
     defaultComplexity: 'complex',
   },
   {
@@ -130,8 +140,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'DevOps Agent',
     description: 'Prepares builds, deployment plans and release checklists',
     systemPrompt:
-      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated.',
-    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.commit', 'git.log', 'git.status'],
+      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy and git.push permissions are approval-gated.',
+    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.commit', 'git.log', 'git.status', 'git.branch', 'git.push'],
     defaultComplexity: 'standard',
   },
   {
