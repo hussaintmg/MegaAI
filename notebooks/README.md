@@ -1,54 +1,91 @@
-# Training MegaAI models on Colab
+# Training MegaAI's models
 
-MegaAI trains its models in-process (`megaai train`), but you can also train
-them **harder on Colab** — bigger datasets, more epochs — and drop the result
-straight back in. The notebook exports the *exact* JSON bundle format the
-runtime loads, so there is no conversion step and no inference server.
+Two families of models, two ways to train them.
 
-## Steps
+| Model | What it does | Notebook | Needs GPU |
+| --- | --- | --- | --- |
+| **`ui-detector`** | Looks at a **screenshot** and finds every UI element with a box | `megaai_train_ui_detector.ipynb` | yes |
+| **`screen-classifier`** | What screen is this? login / checkout / dashboard / … | `megaai_train_screen_classifier.ipynb` | yes |
+| **`ui-defect-detector`** | Is this UI broken, and how? overflow / overlap / cut-off / … | `megaai_train_defect_detector.ipynb` | yes |
+| `ui-purpose`, `lead-scoring`, `error-triage` | Classical models the Node engine loads directly | `megaai_train_colab.ipynb` (JSON bundles) · `megaai_train_sklearn.py` (`.pkl`) | no |
 
-1. Open [Google Colab](https://colab.research.google.com/) → **File → Upload
-   notebook** → choose `megaai_train_colab.ipynb` (or **New notebook** and
-   paste `megaai_train_colab.py` into a cell).
-2. **Runtime → Run all.** It trains the three models and prints held-out
-   accuracy for each. (A GPU runtime isn't required — these are classical
-   models; CPU is fine. Bump `UI_PER_LABEL` / `LEAD_SAMPLES` / `TRIAGE_PER_LABEL`
-   at the top to train on more data.)
-3. The last cell downloads **`megaai-models.zip`**.
-4. In your MegaAI project, unzip it into the models directory:
+---
 
-   ```bash
-   mkdir -p .megaai/models
-   unzip ~/Downloads/megaai-models.zip -d .megaai/models
-   ```
+## The deep models (M1–M3)
 
-5. Restart the server (or re-run the CLI). The SDK loads the models on boot —
-   the UI-purpose model backs vision + desktop element classification, and all
-   three are reachable through the `model.predict` tool. You can confirm with:
+### Step 1 — generate the dataset (on your machine or any runner)
 
-   ```bash
-   node apps/cli/dist/index.js status
-   ```
+MegaAI **creates its own training data**. It renders synthetic pages in real
+headless Chromium and reads every element's class and bounding box straight
+from the DOM, so every label is exact and nothing is annotated by hand. The
+same pass also labels each page's *kind* and any *defect* injected into it —
+so one command produces the dataset for all three models.
 
-That's it — the same three models, trained on more data, now serving the
-running system.
+```bash
+npm run build                                        # once
+node scripts/dataset/generate-ui-dataset.mjs --count 3000 --out dataset
+zip -r dataset.zip dataset
+```
 
-## What the notebook produces
+Options: `--count` (images), `--seed` (reproducibility), `--defect-ratio`
+(share of broken pages, default 0.35), `--val-split` (default 0.2).
 
-`megaai-models/` containing `manifest.json` plus one bundle per model
-(`ui-purpose.json`, `lead-scoring.json`, `error-triage.json`), byte-compatible
-with `saveRegistry()` / `loadRegistry()` in `@megaai/models`. The tokeniser,
-feature encoding and maths mirror `packages/models/src`, so predictions are
-identical in kind to the in-process models — just trained on a larger sample.
+You get:
 
-## About deep-vision models
+```
+dataset/
+├── images/train/*.png   images/val/*.png
+├── labels/train/*.txt   labels/val/*.txt     ← YOLO boxes (ui-detector)
+├── data.yaml                                 ← ultralytics config
+├── screens.csv                               ← page kind (screen-classifier)
+└── defects.csv                               ← injected defect (defect-detector)
+```
 
-A true pixel-level vision model (understanding a screenshot, OCR, visual
-diffing) is a different shape: it can't run inside the Node runtime the way a
-logistic-regression bundle can. The clean way to add one is a small Python
-inference service behind the existing `PredictiveModel` seam — the runtime
-already treats models as pluggable, so that service would register like any
-other model without changing the rest of the system. Ask and this can be
-scaffolded next. Today's vision testing uses **real headless Chromium** plus
-the trained UI-purpose model, which covers responsive/console/a11y/performance
-checks and element-purpose detection without a GPU.
+Start with `--count 300` to see it work end to end; use `--count 3000`+ for a
+model you would actually ship. More images = better model, and it costs only
+time — there is no dataset to buy or label.
+
+### Step 2 — train on Colab
+
+For each notebook:
+
+1. https://colab.research.google.com → **File → Upload notebook** → pick the `.ipynb`.
+2. **Runtime → Change runtime type → T4 GPU** (free tier is enough).
+3. **Runtime → Run all** — it asks you to upload `dataset.zip`, then trains.
+4. Each notebook prints **held-out** metrics (mAP for the detector, per-class
+   accuracy for the classifiers) and downloads `.pt` + `.onnx` at the end.
+
+Rough times on a free T4 with 3000 images: detector ~45–90 min, each
+classifier ~15–25 min.
+
+### Step 3 — send the `.onnx` files back
+
+`.onnx` is the format the **Node engine** can run directly (via
+onnxruntime) — same weights, no Python at inference. Once you have them, they
+get wired into the vision and desktop engines so MegaAI can see UI elements
+from pixels alone, know which screen it is on, and flag visual defects.
+
+---
+
+## The classical models
+
+Already trained and shipping. Two equivalent outputs:
+
+- **JSON bundles** (`megaai_train_colab.ipynb`) — what the Node engine loads.
+  Download `megaai-models.zip`, then `unzip megaai-models.zip -d .megaai/models`.
+- **`.pkl`** (`python notebooks/megaai_train_sklearn.py`) — standard
+  scikit-learn/joblib artifacts for Python (Actions runners, inference
+  services, Colab). Includes a `predict_demo.py` to verify them.
+
+Both train on the same self-generated datasets, so predictions agree.
+
+---
+
+## Notes
+
+- **OCR is not trained here.** Reading text from screenshots uses a
+  pre-trained engine (PaddleOCR/Tesseract) — training our own would spend GPU
+  time reproducing something that already exists at state-of-the-art quality.
+- The notebooks are generated from `build_notebooks.py`, so the training code
+  stays reviewable Python rather than JSON blobs. Edit that file and re-run
+  `python notebooks/build_notebooks.py` to regenerate them.

@@ -16,6 +16,12 @@ workspace/
 notebooks/megaai-models/
 notebooks/*.zip
 
+# generated vision dataset (regenerate with `npm run dataset`) — root only,
+# so scripts/dataset/ (the generator itself) stays tracked
+/dataset/
+*.onnx
+*.pt
+
 # env / secrets
 .env
 .env.*

@@ -68,16 +68,26 @@ above replace/extend them.
 
 ## Division of work
 
-| Step | Who |
-| --- | --- |
-| Build the synthetic page generator + DOM→YOLO auto-labeler (in repo) | MegaAI (me) |
-| Prepare one Colab notebook per model (dataset download + generation + training + export) | MegaAI (me) |
-| Run the notebooks on Colab GPU, download weights | **You** |
-| Wire `.onnx` weights into the vision/desktop engines via onnxruntime-node | MegaAI (me) |
+| Step | Who | Status |
+| --- | --- | --- |
+| Synthetic page generator + DOM→YOLO auto-labeler | MegaAI | ✅ `scripts/dataset/generate-ui-dataset.mjs` |
+| One Colab notebook per model (train + evaluate + export `.pt`/`.onnx`) | MegaAI | ✅ `notebooks/megaai_train_{ui_detector,screen_classifier,defect_detector}.ipynb` |
+| Run the notebooks on Colab GPU, download weights | **You** | ⏳ |
+| Wire `.onnx` weights into the vision/desktop engines (onnxruntime-node) | MegaAI | ⏳ waiting on weights |
+
+## How to run it
+
+```bash
+npm run dataset -- --count 3000 --out dataset    # generates images + labels
+zip -r dataset.zip dataset
+```
+
+Then upload `dataset.zip` into each notebook on Colab (T4 GPU) and Run all.
+Full instructions: [`notebooks/README.md`](../notebooks/README.md).
 
 ## Order
 
 1. **M1 ui-detector** — biggest capability jump (pixel-level element vision).
 2. **M3 ui-defect-detector** — unique dataset, big value for vision testing.
-3. **M2 screen-classifier** — quick win once the generator exists.
+3. **M2 screen-classifier** — quick win, same dataset.
 4. **M4 error-triage-bert** — optional polish.

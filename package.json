@@ -17,7 +17,8 @@
     "test": "npm run build && node --test \"packages/**/*.test.js\" \"apps/**/*.test.js\"",
     "demo": "npm run build && node apps/cli/dist/index.js demo",
     "start": "npm run build && node apps/server/dist/index.js",
-    "cli": "node apps/cli/dist/index.js"
+    "cli": "node apps/cli/dist/index.js",
+    "dataset": "npm run build && node scripts/dataset/generate-ui-dataset.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
