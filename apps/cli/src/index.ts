@@ -16,6 +16,9 @@ import {
   createMegaAI,
   Events,
   generatePlan,
+  loadConfig,
+  saveRegistry,
+  trainAllModels,
   type MegaAI,
 } from '@megaai/sdk';
 
@@ -108,6 +111,26 @@ async function executeGoal(
   }
 }
 
+function trainModels(): number {
+  process.stdout.write(`\n${bold('Training MegaAI models')} ${dim('(real classical ML on self-generated datasets)')}\n\n`);
+  const startedAt = Date.now();
+  const { registry, reports } = trainAllModels();
+  for (const [name, report] of Object.entries(reports)) {
+    const pct = `${Math.round(report.accuracy * 100)}%`.padStart(4);
+    process.stdout.write(
+      `  ${green('✔')} ${name.padEnd(14)} ${pct} held-out accuracy ${dim(`(macro-F1 ${report.macroF1.toFixed(2)})`)}\n`,
+    );
+  }
+  const dir = join(loadConfig().system.dataDir, 'models');
+  saveRegistry(dir, registry);
+  const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+  process.stdout.write(`\n${bold('Saved')} ${registry.list().length} models to ${dir} ${dim(`in ${seconds}s`)}\n`);
+  process.stdout.write(
+    `${dim('The UI-purpose model now backs vision element classification; predict with the model.predict tool.')}\n`,
+  );
+  return 0;
+}
+
 function printPlan(goal: string): number {
   const plan = generatePlan(goal);
   process.stdout.write(`\n${bold('Plan for:')} ${goal}\n`);
@@ -158,6 +181,7 @@ function help(): number {
   process.stdout.write(`  megaai run "<goal>" --model-planner   let the AI generate the plan\n`);
   process.stdout.write(`  megaai plan "<goal>"         show the generated plan only\n`);
   process.stdout.write(`  megaai status                projects, learning and provider status\n`);
+  process.stdout.write(`  megaai train                 train the models pack (UI-purpose, leads, triage)\n`);
   process.stdout.write(`  megaai serve                 how to start the dashboard server\n\n`);
   process.stdout.write(`Environment:\n`);
   process.stdout.write(`  ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY enable real providers;\n`);
@@ -196,6 +220,8 @@ async function main(): Promise<number> {
     }
     case 'status':
       return printStatus();
+    case 'train':
+      return trainModels();
     case 'serve':
       process.stdout.write(`Run the dashboard server with:\n  node apps/server/dist/index.js\n`);
       return 0;

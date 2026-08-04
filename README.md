@@ -52,7 +52,7 @@ flowchart TB
     ORC --> WF[Workflow Engine<br/>steps · retries · checkpoints · approvals]
     WF --> POL[Policy Engine<br/>rules · time windows · approvals]
     ORC --> AR[Agent Runtime<br/>spawn · heartbeat · recover]
-    AR --> AG[Agents · 12 kinds<br/>coding · testing · build · review · research · browser<br/>docs · marketing · crm · devops · architecture · support]
+    AR --> AG[Agents · 13 kinds<br/>coding · testing · build · review · research · browser · vision-testing<br/>docs · marketing · crm · devops · architecture · support]
     AG --> CTX[Context Engine] --> MEM[Memory + Knowledge<br/>vector search]
     AG --> PR[Prompt Engine]
     AG --> AI[AI Session Manager<br/>fallback: anthropic → openai → gemini → mock]
@@ -89,6 +89,9 @@ node apps/cli/dist/index.js run "Build a small api for invoices"
 
 # projects, learning stats, provider status
 node apps/cli/dist/index.js status
+
+# train the models pack (UI-purpose, lead-scoring, error-triage) into .megaai/models
+node apps/cli/dist/index.js train
 
 # live dashboard + REST API on http://127.0.0.1:4100
 node apps/server/dist/index.js
@@ -153,6 +156,32 @@ blocked), shell execution is off by default behind an allowlist, HTTP is
 allowlist-only, `deploy`/`shell.exec` permissions are approval-gated, and
 every action lands in the audit log.
 
+## Trainable models
+
+MegaAI trains its own small models **in-process, offline, on datasets it
+generates itself** — no GPU, no downloaded corpus. `@megaai/models` ships
+real classical ML (softmax logistic regression + multinomial naive Bayes)
+and three concrete models:
+
+| Model | Learns | Backs |
+| --- | --- | --- |
+| `ui-purpose` | what a UI element is *for* (submit, search, delete, nav, …) | vision element classification |
+| `lead-scoring` | hot / warm / cold from lead signals | CRM / sales triage |
+| `error-triage` | routes an error/log line to a category | recovery routing |
+
+```bash
+node apps/cli/dist/index.js train
+#   ✔ ui-purpose      99% held-out accuracy (macro-F1 0.98)
+#   ✔ lead-scoring    87% held-out accuracy (macro-F1 0.87)
+#   ✔ error-triage    94% held-out accuracy (macro-F1 0.94)
+```
+
+Training is deterministic (seeded PRNG) and each model reports **held-out**
+accuracy. Trained models persist to `.megaai/models/`; the SDK loads them on
+boot (the UI-purpose model then replaces the vision heuristic) and exposes
+them through the `model.predict` tool. Heavy deep-vision models can register
+later through the same `PredictiveModel` seam.
+
 ## Packages
 
 | Layer | Packages |
@@ -161,8 +190,8 @@ every action lands in the audit log.
 | Core runtime | `runtime` (DI, lifecycle, health, metrics, scheduler) · `resources` |
 | AI layer | `ai` (providers, models, limits, sessions, fallback) |
 | Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` |
-| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + notifications) |
-| Intelligence | `agents` (12 kinds) · `meta-brain` (template + model planning) · `orchestrator` |
+| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + notifications) · `vision` (UI/responsive testing) |
+| Intelligence | `agents` (13 kinds) · `meta-brain` (template + model planning) · `orchestrator` · `models` (trainable ML pack) |
 | Surface | `sdk` · `apps/cli` · `apps/server` |
 
 ## Extending MegaAI
@@ -197,8 +226,8 @@ distributed workers, and the plugin marketplace.
 ## Development
 
 ```bash
-npm run build     # tsc -b across all 29 workspaces
-npm test          # build + 73 tests (node:test, all offline)
+npm run build     # tsc -b across all 31 workspaces
+npm test          # build + 115 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
 ```
@@ -208,13 +237,15 @@ npm run clean     # remove build output
 Phase 1 (Foundation) and Phase 2 (Execution) are complete. Phase 3
 (Automation) is well underway — the code engine (git-versioned deliveries),
 real build pipelines and test execution, browser automation, an
-approval-gated deployment engine, and a communication + notification engine
-are all in and tested. Phase 4 has begun with model-backed planning
+approval-gated deployment engine, a communication + notification engine, the
+vision/UI testing engine (real headless Chromium), and a trainable models
+pack are all in and tested. Phase 4 has begun with model-backed planning
 (`megaai run "…" --model-planner`). See the [roadmap](./ROADMAP.md) for
-what's next (desktop/vision automation, semantic memory, distributed workers,
-the plugin marketplace) — all building on the contracts already in place.
+what's next (desktop automation, deeper vision, semantic memory, distributed
+workers, the plugin marketplace) — all building on the contracts already in
+place.
 
-**29 workspaces (27 packages + 2 apps) · 97 tests · fully offline demo.**
+**31 workspaces (29 packages + 2 apps) · 115 tests · fully offline demo.**
 
 ## License
 

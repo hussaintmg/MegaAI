@@ -38,6 +38,7 @@ import { createCommandRunner, createToolRegistry, ToolRegistry } from '@megaai/t
 import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
 import { createVisionTools, VisionTester } from '@megaai/vision';
+import { createModelTools, loadRegistry, ModelRegistry as ModelPackRegistry } from '@megaai/models';
 import { createDeployTools, DeployEngine, type DeployTarget } from '@megaai/deploy';
 import { CapturedChannel, CommEngine, createCommTool, NotificationEngine, WebhookChannel } from '@megaai/comm';
 import { ContextEngine } from '@megaai/context';
@@ -87,6 +88,7 @@ export interface MegaAI {
   comm: CommEngine;
   notifications: NotificationEngine;
   vision: VisionTester;
+  models: ModelPackRegistry;
   orchestrator: Orchestrator;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -202,13 +204,20 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     logger: (message, fields) => logger.child('browser').info(message, fields),
   });
   for (const tool of createBrowserTools(browserEngine)) tools.register(tool);
+  // Trained models pack: load persisted models if present (created by
+  // `megaai train`). The UI-purpose model, when trained, replaces the vision
+  // heuristic; lead-scoring and error-triage are reachable via `model.predict`.
+  const models = loadRegistry(join(config.system.dataDir, 'models')) ?? new ModelPackRegistry();
+  const uiModel = models.ui();
   // Vision/UI testing: static analysis always; real headless Chromium when
   // the browser is allowed (and playwright-core + Chromium are present).
   const vision = new VisionTester({
     preferBrowser: config.security.allowBrowser,
+    classifier: uiModel ? uiModel.asClassifier() : undefined,
     logger: (message, fields) => logger.child('vision').info(message, fields),
   });
   for (const tool of createVisionTools(vision)) tools.register(tool);
+  for (const tool of createModelTools(models)) tools.register(tool);
   // Deploy: real execution only when a shell is allowed (and the binary is on
   // the allowlist); otherwise every target simulates. Publishing stays behind
   // the approval-gated `deploy` permission regardless.
@@ -315,6 +324,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     comm,
     notifications,
     vision,
+    models,
     orchestrator,
     async start() {
       if (started) return;
@@ -368,3 +378,17 @@ export { CommEngine, CapturedChannel, WebhookChannel, NotificationEngine, create
 export type { Channel, OutboundMessage, SendReceipt } from '@megaai/comm';
 export { VisionTester, StaticTestDriver, BrowserTestDriver, classifyPurposeHeuristic, createVisionTools } from '@megaai/vision';
 export type { AuditReport, UiElement, PurposeClassifier } from '@megaai/vision';
+export {
+  ModelRegistry as ModelPackRegistry,
+  UiPurposeModel,
+  LeadScoringModel,
+  TriageModel,
+  LogisticRegression,
+  MultinomialNB,
+  Vectorizer,
+  trainAllModels,
+  saveRegistry,
+  loadRegistry,
+  createModelTools,
+} from '@megaai/models';
+export type { PredictiveModel, Prediction, ModelBundle } from '@megaai/models';

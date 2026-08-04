@@ -1,6 +1,6 @@
 # MegaAI Architecture
 
-MegaAI is a layered monorepo: 27 packages + 2 apps, each with a single
+MegaAI is a layered monorepo: 29 packages + 2 apps, each with a single
 responsibility, talking to each other only through the data shapes in
 `@megaai/types` and the interfaces in `@megaai/contracts`. Lower layers never
 import higher ones; the dependency graph is a strict DAG enforced by
@@ -104,7 +104,8 @@ system like this:
 | `deploy` | Deployment engine: pure `deploy.plan` + approval-gated `deploy.execute`; simulated by default, Docker/Vercel/Railway adapters | `DeployEngine`, `createDeployTools` |
 | `comm` | Communication engine: channels (captured/webhook), `comm.send` tool (gated), event-driven `NotificationEngine` for operator updates | `CommEngine`, `NotificationEngine`, `createCommTool` |
 | `vision` | Vision/UI testing: static HTML analysis + real headless Chromium (responsive, console errors, a11y, performance, element detection, mouse/keyboard); `vision.*` tools | `VisionTester`, `StaticTestDriver`, `BrowserTestDriver` |
-| `agents` | Supervised agent lifecycle + 12 built-in agent kinds (coding, testing, build, review, research, browser, documentation, marketing, crm, devops, architecture, support) | `AgentRuntime`, `ModelDrivenAgent` |
+| `models` | Trainable models pack: in-process classical ML (softmax logistic regression, naive Bayes) on self-generated datasets; UI-purpose / lead-scoring / error-triage models; `model.predict` tool | `trainAllModels`, `ModelRegistry`, `LogisticRegression`, `UiPurposeModel` |
+| `agents` | Supervised agent lifecycle + 13 built-in agent kinds (coding, testing, build, review, research, browser, vision-testing, documentation, marketing, crm, devops, architecture, support) | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan generation (templates or model-backed via `makePlan`), decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan`, `parsePlanSpec` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |
 | `sdk` | `createMegaAI()` composition root + re-exports | `createMegaAI` |

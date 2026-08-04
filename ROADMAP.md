@@ -72,6 +72,15 @@ model these plug into already exists.
       mouse/keyboard interaction. `vision.audit/screenshot/interact` tools,
       vision-testing agent, wired into ecommerce/website plans. Run with
       `megaai run "…" --browser`.
+- [x] Trainable models pack (`@megaai/models`): real in-process classical ML
+      (softmax logistic regression + multinomial naive Bayes) trained on
+      seeded, self-generated datasets — no GPU, no downloaded corpus. Three
+      models, each reporting held-out accuracy: UI-purpose (backs the vision
+      engine's element classification), lead-scoring (hot/warm/cold) and
+      error-triage (routes an error/log line to a category). `megaai train`
+      persists them to `.megaai/models/`, the SDK loads them on boot, and the
+      `model.predict` tool serves them. Heavy deep-vision models register
+      later through the same `PredictiveModel` seam.
 - [ ] Deeper vision: image/object analysis, visual diffing, OCR
 - [x] Deployment engine v1 (`@megaai/deploy`): pure `deploy.plan` + approval-gated
       `deploy.execute`; simulated target by default (records `.megaai-deploy.json`
@@ -118,3 +127,4 @@ Self-improving, distributed, extensible.
 | An agent kind | `AgentDescriptor` (+ optional custom `AgentImplementation`) | `createMegaAI({ extraAgents })` |
 | A storage backend | `Database` | construct and pass through the SDK wiring |
 | A plan template | extend `generatePlan()` domains | `@megaai/meta-brain` |
+| A trained model | `PredictiveModel` (`@megaai/models`) | `ModelRegistry.register()` (served by `model.predict`) |

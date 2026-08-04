@@ -71,6 +71,9 @@
       "path": "packages/vision"
     },
     {
+      "path": "packages/models"
+    },
+    {
       "path": "packages/context"
     },
     {

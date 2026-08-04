@@ -33,6 +33,7 @@
     "@megaai/logger": "0.1.0",
     "@megaai/memory": "0.1.0",
     "@megaai/meta-brain": "0.1.0",
+    "@megaai/models": "0.1.0",
     "@megaai/orchestrator": "0.1.0",
     "@megaai/planning": "0.1.0",
     "@megaai/policy": "0.1.0",
