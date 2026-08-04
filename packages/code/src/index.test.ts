@@ -60,6 +60,96 @@ test('status and diff report uncommitted work', async () => {
   }
 });
 
+test('branch create, checkout and list track the current branch', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+
+    await engine.createBranch(dir, 'feature');
+    assert.equal(await engine.currentBranch(dir), 'main');
+
+    await engine.checkout(dir, 'feature');
+    assert.equal(await engine.currentBranch(dir), 'feature');
+
+    const branches = await engine.listBranches(dir);
+    assert.deepEqual(
+      branches.map((b) => b.name).sort(),
+      ['feature', 'main'],
+    );
+    assert.deepEqual(
+      branches.filter((b) => b.current).map((b) => b.name),
+      ['feature'],
+    );
+
+    await engine.checkout(dir, 'other', { create: true });
+    assert.equal(await engine.currentBranch(dir), 'other');
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge brings a branch into the current one and rejects an unmergeable state cleanly', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'shared.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+
+    await engine.checkout(dir, 'feature', { create: true });
+    writeFileSync(join(dir, 'feature.txt'), 'from feature\n');
+    await engine.commitAll(dir, 'feature work');
+
+    await engine.checkout(dir, 'main');
+    const merged = await engine.merge(dir, 'feature');
+    assert.ok(merged.sha);
+    assert.equal(merged.fastForward, true);
+    assert.deepEqual(await engine.status(dir), []);
+
+    // Diverging edits to the same line on both branches → conflict, clean abort.
+    writeFileSync(join(dir, 'shared.txt'), 'main change\n');
+    await engine.commitAll(dir, 'main edits shared');
+    await engine.checkout(dir, 'conflict', { create: true });
+    writeFileSync(join(dir, 'shared.txt'), 'conflicting change\n');
+    await engine.commitAll(dir, 'conflict edits shared');
+    await engine.checkout(dir, 'main');
+    writeFileSync(join(dir, 'shared.txt'), 'main change again\n');
+    await engine.commitAll(dir, 'main edits shared again');
+
+    await assert.rejects(engine.merge(dir, 'conflict'), /git merge failed/);
+    assert.deepEqual(await engine.status(dir), []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('push publishes a branch to a remote', async () => {
+  const { dir, cleanup } = workspace();
+  const remote = workspace();
+  try {
+    const engine = new GitEngine();
+    const bare = await engine.run(remote.dir, ['init', '--bare']);
+    assert.equal(bare.exitCode, 0);
+
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+    await engine.run(dir, ['remote', 'add', 'origin', remote.dir]);
+
+    const pushed = await engine.push(dir, { setUpstream: true });
+    assert.equal(pushed.exitCode, 0);
+
+    const remoteLog = await engine.run(remote.dir, ['log', '--oneline', 'main']);
+    assert.equal(remoteLog.exitCode, 0);
+    assert.match(remoteLog.stdout, /base/);
+
+    await assert.rejects(engine.push(dir, { remote: 'does-not-exist' }), /git push failed/);
+  } finally {
+    cleanup();
+    remote.cleanup();
+  }
+});
+
 test('git tools work through the tool contract and stay in the workspace', async () => {
   const { dir, cleanup } = workspace();
   try {
@@ -83,5 +173,41 @@ test('git tools work through the tool contract and stay in the workspace', async
     await assert.rejects(commit!.execute({ message: '' }, { workspaceRoot: dir }), /must not be empty/);
   } finally {
     cleanup();
+  }
+});
+
+test('branch, checkout, merge and push tools work through the tool contract', async () => {
+  const { dir, cleanup } = workspace();
+  const remote = workspace();
+  try {
+    const engine = new GitEngine();
+    const [, , , , branchList, branchCreate, checkout, merge, push] = createGitTools(engine);
+    const ctx = { workspaceRoot: dir };
+
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+
+    await branchCreate!.execute({ name: 'feature' }, ctx);
+    await checkout!.execute({ name: 'feature' }, ctx);
+    writeFileSync(join(dir, 'b.txt'), 'two\n');
+    await engine.commitAll(dir, 'feature work');
+
+    const branches = (await branchList!.execute({}, ctx)) as { branches: Array<{ name: string; current: boolean }> };
+    assert.deepEqual(
+      branches.branches.map((b) => b.name).sort(),
+      ['feature', 'main'],
+    );
+
+    await checkout!.execute({ name: 'main' }, ctx);
+    const merged = (await merge!.execute({ branch: 'feature' }, ctx)) as { sha: string; fastForward: boolean };
+    assert.ok(merged.sha);
+
+    await engine.run(remote.dir, ['init', '--bare']);
+    await engine.run(dir, ['remote', 'add', 'origin', remote.dir]);
+    const pushed = (await push!.execute({ setUpstream: true }, ctx)) as { exitCode: number };
+    assert.equal(pushed.exitCode, 0);
+  } finally {
+    cleanup();
+    remote.cleanup();
   }
 });
