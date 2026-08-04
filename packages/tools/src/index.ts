@@ -237,6 +237,17 @@ async function runBinary(
   }
 }
 
+/**
+ * A standalone command runner (same allowlist + no-shell-interpolation rules
+ * as `shell.exec`) for other engines that need to run processes — e.g. the
+ * deployment engine. Refuses non-allowlisted binaries.
+ */
+export function createCommandRunner(
+  options: ShellToolOptions,
+): (command: string, args: string[], cwd: string) => Promise<RunOutcome> {
+  return (command, args, cwd) => runBinary(options, cwd, command, args);
+}
+
 export function createShellTool(options: ShellToolOptions): Tool {
   return {
     name: 'shell.exec',

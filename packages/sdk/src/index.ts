@@ -34,9 +34,10 @@ import { KnowledgeBase, MemoryEngine } from '@megaai/memory';
 import { ApprovalManager, PolicyEngine } from '@megaai/policy';
 import { PlanningService } from '@megaai/planning';
 import { WorkflowEngine } from '@megaai/workflow';
-import { createToolRegistry, ToolRegistry } from '@megaai/tools';
+import { createCommandRunner, createToolRegistry, ToolRegistry } from '@megaai/tools';
 import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
+import { createDeployTools, DeployEngine, type DeployTarget } from '@megaai/deploy';
 import { ContextEngine } from '@megaai/context';
 import { MetaBrain } from '@megaai/meta-brain';
 import { Orchestrator, type GoalResult } from '@megaai/orchestrator';
@@ -196,6 +197,17 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     logger: (message, fields) => logger.child('browser').info(message, fields),
   });
   for (const tool of createBrowserTools(browserEngine)) tools.register(tool);
+  // Deploy: real execution only when a shell is allowed (and the binary is on
+  // the allowlist); otherwise every target simulates. Publishing stays behind
+  // the approval-gated `deploy` permission regardless.
+  const deployEngine = new DeployEngine({
+    defaultTarget: config.deploy.defaultTarget as DeployTarget,
+    clock,
+    runner: config.security.allowShell
+      ? createCommandRunner({ enabled: true, allowlist: config.security.shellAllowlist })
+      : undefined,
+  });
+  for (const tool of createDeployTools(deployEngine)) tools.register(tool);
   for (const tool of options.extraTools ?? []) tools.register(tool);
   const contextEngine = new ContextEngine({ memory, planning });
   const meta = new MetaBrain({ database, bus, clock, resources });
@@ -308,3 +320,5 @@ export { MemorySink } from '@megaai/logger';
 export { GitEngine, createGitTools } from '@megaai/code';
 export { BrowserEngine, SimulatedDriver, createBrowserTools } from '@megaai/browser';
 export type { BrowserDriver, BrowserPage } from '@megaai/browser';
+export { DeployEngine, createDeployTools, DEPLOY_TARGETS } from '@megaai/deploy';
+export type { DeployTarget, DeployPlan, DeployResult } from '@megaai/deploy';

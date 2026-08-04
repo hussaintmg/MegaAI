@@ -80,6 +80,9 @@
     },
     {
       "path": "../browser"
+    },
+    {
+      "path": "../deploy"
     }
   ]
 }

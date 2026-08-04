@@ -203,7 +203,11 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
         },
         reason: title,
       });
-      summary = `Prepared (simulated) deployment for "${title}".`;
+      actions.push({ tool: 'deploy.plan', input: {}, reason: 'describe the deployment' });
+      // Approval-gated in policy; auto-resolves under autoApprove, otherwise
+      // pauses for a human — exactly the intended deploy safety behaviour.
+      actions.push({ tool: 'deploy.execute', input: {}, reason: 'deploy the delivery' });
+      summary = `Prepared and deployed "${title}" (simulated target); URL recorded in .megaai-deploy.json.`;
       break;
     }
     case 'crm': {

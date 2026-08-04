@@ -148,8 +148,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'DevOps Agent',
     description: 'Prepares builds, deployment plans and release checklists',
     systemPrompt:
-      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated.',
-    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.commit', 'git.log', 'git.status'],
+      'You are a DevOps engineer. Prepare deployment configuration with the fs tools, produce a rollout plan with deploy.plan, then deploy with deploy.execute (approval-gated). Report the resulting URL.',
+    allowedTools: [...FS_TOOLS, 'deploy.plan', 'deploy.execute', 'shell.exec', 'git.commit', 'git.log', 'git.status'],
     defaultComplexity: 'standard',
   },
   {

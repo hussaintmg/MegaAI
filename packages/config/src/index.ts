@@ -75,6 +75,10 @@ export interface MegaConfig {
     host: string;
     port: number;
   };
+  deploy: {
+    /** simulated | static | docker | vercel | railway */
+    defaultTarget: string;
+  };
 }
 
 export function defaultConfig(): MegaConfig {
@@ -122,6 +126,7 @@ export function defaultConfig(): MegaConfig {
       browserAllowedHosts: [],
     },
     server: { host: '127.0.0.1', port: 4100 },
+    deploy: { defaultTarget: 'simulated' },
   };
 }
 

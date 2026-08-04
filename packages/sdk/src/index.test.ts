@@ -132,16 +132,22 @@ test('without auto-approve the run waits for a human decision', async () => {
     });
     await megaai.start();
 
-    const goalPromise = megaai.submitGoal('Build a small api for notes');
-    const requested = await megaai.bus.waitFor<{ approval: { id: string } }>(Events.ApprovalRequested, {
-      timeoutMs: 5_000,
+    // A human resolves every gate as it arrives (plan approval, and the
+    // approval-gated deploy). Count them to prove the run really waited.
+    let approvals = 0;
+    megaai.bus.on<{ approval: { id: string } }>(Events.ApprovalRequested, (event) => {
+      approvals += 1;
+      megaai.orchestrator.approve(event.payload.approval.id, true, 'test-human');
     });
-    // Nothing has run yet — the plan is gated on a human.
-    assert.equal(megaai.approvals.pending().length, 1);
-    megaai.orchestrator.approve(requested.payload.approval.id, true, 'test-human');
+
+    const goalPromise = megaai.submitGoal('Build a small api for notes');
+    // The plan gate blocks before any task runs.
+    const requested = await megaai.bus.waitFor(Events.ApprovalRequested, { timeoutMs: 5_000 });
+    assert.ok(requested);
 
     const result = await goalPromise;
     assert.equal(result.project.status, 'completed');
+    assert.ok(approvals >= 2, `expected plan + deploy approvals, saw ${approvals}`);
     await megaai.stop();
   } finally {
     cleanup();

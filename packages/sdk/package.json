@@ -27,6 +27,7 @@
     "@megaai/context": "0.1.0",
     "@megaai/contracts": "0.1.0",
     "@megaai/database": "0.1.0",
+    "@megaai/deploy": "0.1.0",
     "@megaai/events": "0.1.0",
     "@megaai/logger": "0.1.0",
     "@megaai/memory": "0.1.0",

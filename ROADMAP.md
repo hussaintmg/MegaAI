@@ -65,7 +65,11 @@ model these plug into already exists.
 - [ ] Browser sessions: profiles, tabs, cookies, logins, downloads
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
 - [ ] Vision (screenshots, UI understanding, image analysis)
-- [ ] Deployment integrations (Docker, VPS, Railway, Vercel, Cloudflare) behind the approval-gated `deploy` permission
+- [x] Deployment engine v1 (`@megaai/deploy`): pure `deploy.plan` + approval-gated
+      `deploy.execute`; simulated target by default (records `.megaai-deploy.json`
+      with a URL), Docker/Vercel/Railway/static adapters as command lists run by
+      an allowlisted runner only when a shell is enabled
+- [ ] More targets (Cloudflare, Kubernetes, VPS) + live URL/health readback
 - [ ] Communication channels (email, WhatsApp, Slack, Discord, Telegram) behind `comm.send`
 - [ ] CRM integrations (clients, invoices, leads, meetings, payments)
 - [ ] Scheduler-driven recurring jobs (reports, monitors, follow-ups)

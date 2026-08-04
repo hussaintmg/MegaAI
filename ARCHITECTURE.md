@@ -101,6 +101,7 @@ system like this:
 | `context` | Budgeted context assembly from planning + memory | `ContextEngine` |
 | `code` | Code engine: git for delivery workspaces (auto-versioned deliveries, `git.*` agent tools) | `GitEngine`, `createGitTools` |
 | `browser` | Browser automation: pluggable driver (offline simulator + optional Playwright), `browser.*` tools gated on `net.browser` | `BrowserEngine`, `SimulatedDriver`, `createBrowserTools` |
+| `deploy` | Deployment engine: pure `deploy.plan` + approval-gated `deploy.execute`; simulated by default, Docker/Vercel/Railway adapters | `DeployEngine`, `createDeployTools` |
 | `agents` | Supervised agent lifecycle + 9 built-in agent kinds | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan templates, decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |

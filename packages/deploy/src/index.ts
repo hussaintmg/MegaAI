@@ -1,0 +1,214 @@
+/**
+ * @megaai/deploy — the deployment engine (Phase 3, milestone 3).
+ *
+ * Two operations, deliberately split by risk:
+ *   - `plan`    is pure and side-effect-free: it describes what a deploy to a
+ *               given target would do (commands + expected URL). Safe to run
+ *               freely (`deploy.plan` permission).
+ *   - `execute` performs the deploy (`deploy` permission — approval-gated by
+ *               default). Without a command runner, or with the `simulated`
+ *               target, it returns a deterministic result and records it,
+ *               so the whole flow is exercisable offline.
+ *
+ * Real targets (Docker/Vercel/Railway) are expressed as command lists an
+ * injected runner executes; publishing therefore stays behind both the
+ * approval gate and the shell allowlist.
+ */
+
+import { writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import type { JsonObject, JsonValue, Timestamp } from '@megaai/types';
+import { MegaError } from '@megaai/types';
+import { type Clock, slugify, systemClock } from '@megaai/utils';
+import type { Tool } from '@megaai/contracts';
+
+export type DeployTarget = 'simulated' | 'static' | 'docker' | 'vercel' | 'railway';
+
+export const DEPLOY_TARGETS: DeployTarget[] = ['simulated', 'static', 'docker', 'vercel', 'railway'];
+
+export interface DeployCommand {
+  command: string;
+  args: string[];
+}
+
+export interface DeployPlan {
+  target: DeployTarget;
+  appName: string;
+  description: string;
+  commands: DeployCommand[];
+  estimatedUrl: string;
+  /** True when execution needs no external commands (safe to auto-run). */
+  simulated: boolean;
+}
+
+export interface DeployResult {
+  target: DeployTarget;
+  appName: string;
+  url: string;
+  simulated: boolean;
+  deployedAt: Timestamp;
+  steps: Array<{ command: string; ok: boolean; exitCode: number }>;
+}
+
+/** Injected command runner (wired to the shell tool when enabled). */
+export type CommandRunner = (
+  command: string,
+  args: string[],
+  cwd: string,
+) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+
+function buildPlan(target: DeployTarget, appName: string): Omit<DeployPlan, 'appName'> {
+  switch (target) {
+    case 'docker':
+      return {
+        target,
+        description: 'Build a Docker image and run the container',
+        commands: [
+          { command: 'docker', args: ['build', '-t', appName, '.'] },
+          { command: 'docker', args: ['run', '-d', '-p', '3000:3000', '--name', appName, appName] },
+        ],
+        estimatedUrl: 'http://localhost:3000',
+        simulated: false,
+      };
+    case 'vercel':
+      return {
+        target,
+        description: 'Deploy to Vercel (production)',
+        commands: [{ command: 'vercel', args: ['deploy', '--prod', '--yes'] }],
+        estimatedUrl: `https://${appName}.vercel.app`,
+        simulated: false,
+      };
+    case 'railway':
+      return {
+        target,
+        description: 'Deploy to Railway',
+        commands: [{ command: 'railway', args: ['up', '--detach'] }],
+        estimatedUrl: `https://${appName}.up.railway.app`,
+        simulated: false,
+      };
+    case 'static':
+      return {
+        target,
+        description: 'Publish static files to MegaAI hosting',
+        commands: [],
+        estimatedUrl: `https://${appName}.megaai.app`,
+        simulated: true,
+      };
+    case 'simulated':
+    default:
+      return {
+        target: 'simulated',
+        description: 'Simulated deploy (no external calls) — returns a placeholder URL',
+        commands: [],
+        estimatedUrl: `https://${appName}.megaai.app`,
+        simulated: true,
+      };
+  }
+}
+
+export interface DeployEngineOptions {
+  defaultTarget?: DeployTarget;
+  /** When absent, every target simulates (no external commands run). */
+  runner?: CommandRunner;
+  clock?: Clock;
+}
+
+export class DeployEngine {
+  private readonly defaultTarget: DeployTarget;
+  private readonly runner?: CommandRunner;
+  private readonly clock: Clock;
+
+  constructor(options: DeployEngineOptions = {}) {
+    this.defaultTarget = options.defaultTarget ?? 'simulated';
+    this.runner = options.runner;
+    this.clock = options.clock ?? systemClock;
+  }
+
+  appNameFor(workspaceDir: string, override?: string): string {
+    return slugify(override ?? basename(workspaceDir));
+  }
+
+  plan(workspaceDir: string, options: { target?: DeployTarget; appName?: string } = {}): DeployPlan {
+    const target = options.target ?? this.defaultTarget;
+    if (!DEPLOY_TARGETS.includes(target)) {
+      throw new MegaError('INVALID_INPUT', `Unknown deploy target "${target}"`);
+    }
+    const appName = this.appNameFor(workspaceDir, options.appName);
+    return { ...buildPlan(target, appName), appName };
+  }
+
+  async execute(
+    workspaceDir: string,
+    options: { target?: DeployTarget; appName?: string } = {},
+  ): Promise<DeployResult> {
+    const plan = this.plan(workspaceDir, options);
+    const steps: DeployResult['steps'] = [];
+
+    // Simulated targets — or the absence of a runner — never shell out.
+    const canRunReal = this.runner && !plan.simulated && plan.commands.length > 0;
+    if (canRunReal) {
+      for (const step of plan.commands) {
+        const outcome = await (this.runner as CommandRunner)(step.command, step.args, workspaceDir);
+        steps.push({ command: `${step.command} ${step.args.join(' ')}`.trim(), ok: outcome.exitCode === 0, exitCode: outcome.exitCode });
+        if (outcome.exitCode !== 0) {
+          throw new MegaError('INTERNAL', `deploy step "${step.command}" failed (exit ${outcome.exitCode}): ${outcome.stderr.slice(0, 1_000)}`, {
+            steps: steps as unknown as JsonValue,
+          });
+        }
+      }
+    }
+
+    const result: DeployResult = {
+      target: plan.target,
+      appName: plan.appName,
+      url: plan.estimatedUrl,
+      simulated: !canRunReal,
+      deployedAt: this.clock.now(),
+      steps,
+    };
+    // Record the deploy alongside the delivery.
+    try {
+      writeFileSync(join(workspaceDir, '.megaai-deploy.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+    } catch {
+      /* recording is best-effort */
+    }
+    return result;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Agent-facing tools
+ * ------------------------------------------------------------------ */
+
+function optTarget(input: JsonObject): DeployTarget | undefined {
+  const value = input.target;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !DEPLOY_TARGETS.includes(value as DeployTarget)) {
+    throw new MegaError('INVALID_INPUT', `target must be one of ${DEPLOY_TARGETS.join(', ')}`);
+  }
+  return value as DeployTarget;
+}
+
+export function createDeployTools(engine: DeployEngine): Tool[] {
+  const plan: Tool = {
+    name: 'deploy.plan',
+    description: 'Describe how the project would be deployed to a target (no side effects)',
+    inputSchema: { target: `string (optional: ${DEPLOY_TARGETS.join(' | ')})`, appName: 'string (optional)' },
+    permissions: ['deploy.plan'],
+    async execute(input, ctx) {
+      const appName = typeof input.appName === 'string' ? input.appName : undefined;
+      return engine.plan(ctx.workspaceRoot, { target: optTarget(input), appName }) as unknown as JsonValue;
+    },
+  };
+  const execute: Tool = {
+    name: 'deploy.execute',
+    description: 'Deploy the project to a target (approval-gated); returns the deployment URL',
+    inputSchema: { target: `string (optional: ${DEPLOY_TARGETS.join(' | ')})`, appName: 'string (optional)' },
+    permissions: ['deploy'],
+    async execute(input, ctx) {
+      const appName = typeof input.appName === 'string' ? input.appName : undefined;
+      return (await engine.execute(ctx.workspaceRoot, { target: optTarget(input), appName })) as unknown as JsonValue;
+    },
+  };
+  return [plan, execute];
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@megaai/deploy",
+  "version": "0.1.0",
+  "description": "Deployment engine: plan and (approval-gated) execute deployments — simulated by default, with Docker/Vercel/Railway adapters",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/contracts": "0.1.0",
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0"
+  },
+  "license": "MIT"
+}
