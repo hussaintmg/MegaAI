@@ -4,6 +4,8 @@ node_modules/
 # build output
 dist/
 *.tsbuildinfo
+apps/web/.next/
+apps/web/next-env.d.ts
 
 # runtime state and demo output
 workspace/

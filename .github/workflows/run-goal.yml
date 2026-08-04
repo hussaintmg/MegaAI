@@ -1,0 +1,47 @@
+# Executes one MegaAI goal on a GitHub Actions runner. Dispatched by the
+# cloud platform (apps/web) when a goal is submitted; reports progress and the
+# final delivery back through the platform's executor API and uploads the
+# whole workspace as an artifact.
+
+name: Run MegaAI goal
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal_id:
+        description: Platform goal id
+        required: true
+        type: string
+
+concurrency:
+  group: goal-${{ inputs.goal_id }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build the engine
+        run: npm run build
+      - name: Execute the goal
+        env:
+          PLATFORM_URL: ${{ secrets.PLATFORM_URL }}
+          EXECUTOR_TOKEN: ${{ secrets.EXECUTOR_TOKEN }}
+          GOAL_ID: ${{ inputs.goal_id }}
+        run: node scripts/executor/run-goal.mjs
+      - name: Upload delivery workspace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delivery-${{ inputs.goal_id }}
+          path: workspace/
+          if-no-files-found: ignore
+          retention-days: 30

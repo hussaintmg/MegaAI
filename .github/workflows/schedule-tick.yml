@@ -1,0 +1,29 @@
+# The platform's clock: pings /api/cron so due recurring goals dispatch
+# themselves. Runs every 30 minutes; harmless when nothing is due.
+
+name: Schedule tick
+
+on:
+  schedule:
+    - cron: '13,43 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Tick the platform scheduler
+        env:
+          PLATFORM_URL: ${{ secrets.PLATFORM_URL }}
+          EXECUTOR_TOKEN: ${{ secrets.EXECUTOR_TOKEN }}
+        run: |
+          if [ -z "$PLATFORM_URL" ] || [ -z "$EXECUTOR_TOKEN" ]; then
+            echo "PLATFORM_URL / EXECUTOR_TOKEN secrets not set — skipping."
+            exit 0
+          fi
+          curl -sS -X POST "$PLATFORM_URL/api/cron" \
+            -H "authorization: Bearer $EXECUTOR_TOKEN" \
+            -H "content-type: application/json" \
+            --max-time 60 \
+            -w "\nHTTP %{http_code}\n"

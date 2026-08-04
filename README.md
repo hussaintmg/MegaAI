@@ -70,7 +70,15 @@ package. Full detail in [ARCHITECTURE.md](./ARCHITECTURE.md), original
 vision in [docs/VISION.md](./docs/VISION.md), phase plan in
 [ROADMAP.md](./ROADMAP.md).
 
-## Quick start
+## Run it in the cloud (no local machine needed)
+
+MegaAI ships a hosted platform: a **Next.js dashboard on Vercel** (login-only
+auth, API keys entered in the UI and AES-256 encrypted in MongoDB, users
+managed by the admin) with **GitHub Actions as the execution engine** — every
+goal runs the full MegaAI engine on a runner and reports back live. Recurring
+goals run on an Actions cron. Setup in ~15 minutes: **[SETUP-CLOUD.md](./SETUP-CLOUD.md)**.
+
+## Quick start (local)
 
 Requires Node.js ≥ 20.
 

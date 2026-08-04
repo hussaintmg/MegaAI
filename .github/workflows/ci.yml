@@ -22,3 +22,6 @@ jobs:
         run: node --test "packages/**/*.test.js" "apps/**/*.test.js"
       - name: Demo (end-to-end smoke test)
         run: node apps/cli/dist/index.js demo --quiet
+      - name: Build cloud platform (Next.js)
+        run: npx next build
+        working-directory: apps/web
