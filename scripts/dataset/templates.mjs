@@ -28,6 +28,16 @@ export const SCREEN_KINDS = [
 /** The defect kinds the defect detector learns ('clean' = no defect). */
 export const DEFECT_KINDS = ['clean', 'overflow', 'overlap', 'cutoff', 'broken-image', 'tiny-text', 'low-contrast'];
 
+/**
+ * Page kinds that reliably contain images.
+ *
+ * The `broken-image` defect is only meaningful here: injected into a page with
+ * no <img>, it renders identically to a clean page, so the label would be a
+ * lie and the model cannot possibly learn it. (Measured: a first run that
+ * ignored this scored 3.8% on broken-image, with 24 of 26 predicted clean.)
+ */
+export const KINDS_WITH_IMAGES = ['product-list', 'article'];
+
 const FONTS = [
   'system-ui, sans-serif',
   'Georgia, serif',
@@ -116,7 +126,7 @@ function header(h, brand, p) {
  * ------------------------------------------------------------------ */
 
 const BODIES = {
-  login: (h, brand, p) => `
+  login: (h, brand, p, opts) => `
     <div class="wrap" style="max-width:420px">
       <h1>Sign in to ${brand}</h1>
       <p>Welcome back. Enter your details to continue.</p>
@@ -129,7 +139,7 @@ const BODIES = {
       ${h.chance(0.5) ? `<p>New here? <a href="/signup">Create an account</a></p>` : ''}
     </div>`,
 
-  signup: (h, brand, p) => `
+  signup: (h, brand, p, opts) => `
     <div class="wrap" style="max-width:460px">
       <h1>Create your ${brand} account</h1>
       <div class="panel">
@@ -142,7 +152,7 @@ const BODIES = {
       </div>
     </div>`,
 
-  checkout: (h, brand, p) => `
+  checkout: (h, brand, p, opts) => `
     <div class="wrap">
       <h1>Checkout</h1>
       <div class="panel">
@@ -203,7 +213,7 @@ const BODIES = {
     </div>`;
   },
 
-  dashboard: (h, brand, p) => `
+  dashboard: (h, brand, p, opts) => `
     <div class="wrap">
       <h1>Dashboard</h1>
       <div class="grid">
@@ -226,7 +236,7 @@ const BODIES = {
       <div class="row"><button>Export report</button><button class="ghost">Settings</button></div>
     </div>`,
 
-  'contact-form': (h, brand, p) => `
+  'contact-form': (h, brand, p, opts) => `
     <div class="wrap" style="max-width:560px">
       <h1>Contact us</h1>
       <p>We usually reply within one business day.</p>
@@ -240,11 +250,11 @@ const BODIES = {
       </div>
     </div>`,
 
-  article: (h, brand, p) => `
+  article: (h, brand, p, opts) => `
     <div class="wrap" style="max-width:680px">
       <h1>How ${brand} rebuilt its platform</h1>
       <p>Published ${h.int(1, 28)} March · ${h.int(3, 12)} min read</p>
-      ${h.chance(0.8) ? `<img src="${img(p.accent)}" alt="cover" style="width:100%;height:220px;object-fit:cover;border-radius:10px">` : ''}
+      ${opts.forceImages || h.chance(0.8) ? `<img src="${img(p.accent)}" alt="cover" style="width:100%;height:220px;object-fit:cover;border-radius:10px">` : ''}
       ${Array.from({ length: h.int(3, 5) })
         .map(
           () =>
@@ -256,14 +266,14 @@ const BODIES = {
       <div class="row"><button>Share</button><a href="/blog">More articles</a></div>
     </div>`,
 
-  error: (h, brand, p) => `
+  error: (h, brand, p, opts) => `
     <div class="wrap" style="max-width:520px;text-align:center;padding-top:70px">
       <h1>${h.pick(['404', '500', 'Something went wrong'])}</h1>
       <p>${h.pick(['We could not find that page.', 'An unexpected error occurred.', 'This link may have expired.'])}</p>
       <div class="row" style="justify-content:center"><button>Go home</button><button class="ghost">Contact support</button></div>
     </div>`,
 
-  settings: (h, brand, p) => `
+  settings: (h, brand, p, opts) => `
     <div class="wrap" style="max-width:640px">
       <h1>Settings</h1>
       <div class="panel">
@@ -307,7 +317,7 @@ export function buildPage(rng, options = {}) {
   const scale = h.int(13, 18);
   const brand = h.pick(BRANDS);
 
-  let body = BODIES[kind](h, brand, palette);
+  let body = BODIES[kind](h, brand, palette, { forceImages: options.forceImages === true });
   // A "broken image" is a real broken src, not a CSS trick.
   if (defect === 'broken-image') body = body.replace(/src="data:[^"]*"/g, 'src="/missing-asset-404.png"');
 

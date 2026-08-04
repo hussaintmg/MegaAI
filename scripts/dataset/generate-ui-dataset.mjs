@@ -22,7 +22,7 @@ import { mkdirSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { launchChromium } from '../../packages/vision/dist/launch.js';
-import { buildPage, DEFECT_KINDS, SCREEN_KINDS } from './templates.mjs';
+import { buildPage, DEFECT_KINDS, KINDS_WITH_IMAGES, SCREEN_KINDS } from './templates.mjs';
 
 /** YOLO class ids — order matters, it is baked into the label files. */
 export const CLASSES = ['button', 'input', 'link', 'checkbox', 'radio', 'select', 'textarea', 'image', 'heading', 'nav'];
@@ -43,6 +43,23 @@ function mulberry32(seed) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/** Seeded shuffle, so the balanced schedule is still deterministic. */
+class Rng {
+  constructor(seed) {
+    this.next = mulberry32(seed);
+  }
+  shuffle(items) {
+    const out = items.slice();
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
+    }
+    return out;
+  }
 }
 
 function parseArgs(argv) {
@@ -133,14 +150,28 @@ async function main() {
   const counts = { train: 0, val: 0 };
   let boxTotal = 0;
 
+  // Build a balanced schedule up front rather than sampling per image: with
+  // six defect kinds, uniform sampling leaves each one a small minority of a
+  // mostly-clean set, and a classifier trained on that learns to answer
+  // "clean". Here every defect kind gets an equal share of `defectRatio`.
+  const defectPool = DEFECT_KINDS.filter((d) => d !== 'clean');
+  const schedule = [];
   for (let i = 0; i < args.count; i++) {
-    const split = rng() < args.valSplit ? 'val' : 'train';
-    const kind = SCREEN_KINDS[Math.floor(rng() * SCREEN_KINDS.length)];
-    const withDefect = rng() < args.defectRatio;
-    const defectPool = DEFECT_KINDS.filter((d) => d !== 'clean');
-    const defect = withDefect ? defectPool[Math.floor(rng() * defectPool.length)] : 'clean';
+    const useDefect = i < Math.round(args.count * args.defectRatio);
+    const defect = useDefect ? defectPool[i % defectPool.length] : 'clean';
+    // `broken-image` is only visible on a page that actually has images —
+    // anywhere else the "defect" renders identically to clean, so the label
+    // would be unlearnable.
+    const kinds = defect === 'broken-image' ? KINDS_WITH_IMAGES : SCREEN_KINDS;
+    schedule.push({ kind: kinds[Math.floor(rng() * kinds.length)], defect });
+  }
+  const plan = new Rng(args.seed ^ 0x5f3759df).shuffle(schedule);
 
-    const { html } = buildPage(rng, { kind, defect });
+  for (let i = 0; i < plan.length; i++) {
+    const split = rng() < args.valSplit ? 'val' : 'train';
+    const { kind, defect } = plan[i];
+
+    const { html } = buildPage(rng, { kind, defect, forceImages: defect === 'broken-image' });
     const viewport = VIEWPORTS[Math.floor(rng() * VIEWPORTS.length)];
 
     await page.setViewportSize(viewport);
