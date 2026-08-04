@@ -108,6 +108,15 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     defaultComplexity: 'standard',
   },
   {
+    kind: 'browser',
+    name: 'Browser Agent',
+    description: 'Opens web pages, reads and interacts with them',
+    systemPrompt:
+      'You are a web automation agent. Use the browser tools to open the relevant page, read its content, click where needed, and report what you found. Stay on allowlisted hosts.',
+    allowedTools: ['browser.fetch', 'browser.open', 'browser.read', 'browser.click', 'browser.screenshot', 'fs.write'],
+    defaultComplexity: 'standard',
+  },
+  {
     kind: 'documentation',
     name: 'Documentation Agent',
     description: 'Writes user and developer documentation',

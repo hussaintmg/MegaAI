@@ -36,6 +36,7 @@ import { PlanningService } from '@megaai/planning';
 import { WorkflowEngine } from '@megaai/workflow';
 import { createToolRegistry, ToolRegistry } from '@megaai/tools';
 import { createGitTools, GitEngine } from '@megaai/code';
+import { BrowserEngine, createBrowserTools } from '@megaai/browser';
 import { ContextEngine } from '@megaai/context';
 import { MetaBrain } from '@megaai/meta-brain';
 import { Orchestrator, type GoalResult } from '@megaai/orchestrator';
@@ -189,6 +190,12 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     httpAllowedHosts: config.security.httpAllowedHosts,
   });
   for (const tool of createGitTools(new GitEngine())) tools.register(tool);
+  const browserEngine = new BrowserEngine({
+    allowedHosts: config.security.browserAllowedHosts,
+    preferReal: config.security.allowBrowser,
+    logger: (message, fields) => logger.child('browser').info(message, fields),
+  });
+  for (const tool of createBrowserTools(browserEngine)) tools.register(tool);
   for (const tool of options.extraTools ?? []) tools.register(tool);
   const contextEngine = new ContextEngine({ memory, planning });
   const meta = new MetaBrain({ database, bus, clock, resources });
@@ -299,3 +306,5 @@ export { generatePlan, analyzeGoal } from '@megaai/meta-brain';
 export type { GoalResult } from '@megaai/orchestrator';
 export { MemorySink } from '@megaai/logger';
 export { GitEngine, createGitTools } from '@megaai/code';
+export { BrowserEngine, SimulatedDriver, createBrowserTools } from '@megaai/browser';
+export type { BrowserDriver, BrowserPage } from '@megaai/browser';

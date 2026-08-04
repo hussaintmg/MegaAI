@@ -56,6 +56,9 @@
       "path": "packages/prompt"
     },
     {
+      "path": "packages/browser"
+    },
+    {
       "path": "packages/code"
     },
     {

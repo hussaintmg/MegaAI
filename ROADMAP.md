@@ -57,7 +57,12 @@ model these plug into already exists.
       fails the task and triggers recovery
 - [ ] Git collaboration (branches, merge, remote push behind approval)
 - [ ] `npm install`/`npm build` pipelines for dependency-bearing projects
-- [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
+- [x] Browser automation v1 (`@megaai/browser`): pluggable driver — offline
+      deterministic simulator by default, optional real Chromium via
+      Playwright (dynamic import, config-gated); `browser.fetch/open/read/
+      click/screenshot` tools on the `net.browser` permission, host-allowlisted;
+      browser agent kind
+- [ ] Browser sessions: profiles, tabs, cookies, logins, downloads
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
 - [ ] Vision (screenshots, UI understanding, image analysis)
 - [ ] Deployment integrations (Docker, VPS, Railway, Vercel, Cloudflare) behind the approval-gated `deploy` permission

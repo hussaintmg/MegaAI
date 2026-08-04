@@ -67,6 +67,9 @@ export interface MegaConfig {
     allowShell: boolean;
     shellAllowlist: string[];
     httpAllowedHosts: string[];
+    /** When true, browser.* tools try the real Playwright driver. */
+    allowBrowser: boolean;
+    browserAllowedHosts: string[];
   };
   server: {
     host: string;
@@ -115,6 +118,8 @@ export function defaultConfig(): MegaConfig {
       allowShell: false,
       shellAllowlist: ['node', 'npm', 'git', 'ls', 'cat'],
       httpAllowedHosts: [],
+      allowBrowser: false,
+      browserAllowedHosts: [],
     },
     server: { host: '127.0.0.1', port: 4100 },
   };

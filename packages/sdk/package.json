@@ -21,6 +21,7 @@
     "@megaai/actions": "0.1.0",
     "@megaai/agents": "0.1.0",
     "@megaai/ai": "0.1.0",
+    "@megaai/browser": "0.1.0",
     "@megaai/code": "0.1.0",
     "@megaai/config": "0.1.0",
     "@megaai/context": "0.1.0",

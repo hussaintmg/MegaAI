@@ -215,6 +215,14 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       summary = `Updated CRM records for "${title}".`;
       break;
     }
+    case 'browser': {
+      // Pull a URL out of the task if present, else visit a synthetic page.
+      const match = `${title} ${description}`.match(/https?:\/\/[^\s)]+/);
+      const url = match?.[0] ?? 'https://example.com';
+      actions.push({ tool: 'browser.fetch', input: { url }, reason: title });
+      summary = `Browsed ${url} for "${title}" and captured its content.`;
+      break;
+    }
     case 'research':
     case 'review':
     case 'architecture':
