@@ -101,9 +101,19 @@ model these plug into already exists.
 - [x] Notification engine: watches lifecycle events (goal/project/approval)
       and pushes operator updates to the configured channel — surfaced at
       `GET /api/notifications`
-- [ ] Native email (SMTP) and per-service channel adapters
-- [ ] CRM integrations (clients, invoices, leads, meetings, payments)
-- [ ] Scheduler-driven recurring jobs (reports, monitors, follow-ups)
+- [x] Native email (`@megaai/comm` `EmailChannel`): composes a proper RFC5322
+      message and delivers through a pluggable transport — an HTTP email API
+      (SendGrid/Postmark-style, host-allowlisted) or SMTP via the optional
+      `nodemailer` seam; captures the composed message offline. Registered as an
+      `email` channel when `comm.email.from` is configured.
+- [x] CRM engine (`@megaai/crm`): clients, leads (scored hot/warm/cold by the
+      trained lead-scoring model), activities and invoices behind the Database
+      contract; `crm.client.upsert` / `crm.lead.add` / `crm.activity.log` /
+      `crm.invoice.create` / `crm.summary` tools; the CRM agent uses them.
+- [x] Recurring scheduled jobs (`@megaai/jobs`): durable job records run on the
+      runtime Scheduler with pluggable job kinds; `jobs.schedule/list/run/cancel`
+      tools; built-in `operator-report` and `crm-followup` kinds push summaries
+      to the notify channel. Survive restarts; run bookkeeping per job.
 
 ## Phase 4 — Intelligence layer 🔮
 

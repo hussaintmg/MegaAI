@@ -109,6 +109,138 @@ export class WebhookChannel implements Channel {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Email — RFC5322 composition + pluggable transport (SMTP / HTTP API)
+ * ------------------------------------------------------------------ */
+
+export interface EmailEnvelope {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  date: string;
+  messageId: string;
+  /** The full RFC5322 message (headers + body). */
+  raw: string;
+}
+
+export interface EmailResult {
+  ok: boolean;
+  detail?: string;
+}
+
+/** The seam a real backend implements: SMTP, an email API, a queue, … */
+export type EmailTransport = (envelope: EmailEnvelope) => Promise<EmailResult>;
+
+export interface EmailChannelOptions {
+  from: string;
+  defaultTo?: string;
+  /** Real delivery backend; when omitted the channel composes + captures only. */
+  transport?: EmailTransport;
+  clock?: Clock;
+  capacity?: number;
+}
+
+/**
+ * Native email channel: composes a proper RFC5322 message and hands it to a
+ * transport. Offline-first — with no transport it records composed envelopes
+ * (readable in tests / the dashboard); a real SMTP or HTTP-API transport plugs
+ * in via `createSmtpTransport` / `createHttpEmailTransport`.
+ */
+export class EmailChannel implements Channel {
+  readonly kind = 'email';
+  readonly sent: EmailEnvelope[] = [];
+  private readonly clock: Clock;
+  private readonly capacity: number;
+
+  constructor(
+    readonly name: string,
+    private readonly options: EmailChannelOptions,
+  ) {
+    if (!options.from || !options.from.trim()) throw new MegaError('INVALID_INPUT', 'EmailChannel needs a "from" address');
+    this.clock = options.clock ?? systemClock;
+    this.capacity = options.capacity ?? 500;
+  }
+
+  compose(message: OutboundMessage): EmailEnvelope {
+    const to = message.to ?? this.options.defaultTo;
+    if (!to || !to.trim()) throw new MegaError('INVALID_INPUT', 'email needs a recipient (message.to or a configured default)');
+    const subject = message.subject ?? '(no subject)';
+    const date = new Date(this.clock.now()).toUTCString();
+    const messageId = `<${newId('email')}@megaai>`;
+    const headers = [
+      `From: ${this.options.from}`,
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      `Date: ${date}`,
+      `Message-ID: ${messageId}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=utf-8',
+    ];
+    return { from: this.options.from, to, subject, text: message.text, date, messageId, raw: `${headers.join('\r\n')}\r\n\r\n${message.text}` };
+  }
+
+  async send(message: OutboundMessage): Promise<SendReceipt> {
+    const envelope = this.compose(message);
+    const at = this.clock.now();
+    this.sent.push(envelope);
+    if (this.sent.length > this.capacity) this.sent.splice(0, this.sent.length - this.capacity);
+    if (!this.options.transport) {
+      return { id: newId('msg'), channel: this.name, ok: true, at, detail: 'composed (no transport configured — captured)' };
+    }
+    try {
+      const result = await this.options.transport(envelope);
+      return { id: newId('msg'), channel: this.name, ok: result.ok, at, detail: result.detail };
+    } catch (err) {
+      return { id: newId('msg'), channel: this.name, ok: false, at, detail: String(err) };
+    }
+  }
+}
+
+/** Deliver email by POSTing to an HTTP email API (SendGrid/Postmark-style). Host-allowlisted. */
+export function createHttpEmailTransport(url: string, options: { allowedHosts?: string[]; timeoutMs?: number } = {}): EmailTransport {
+  const host = new URL(url).hostname;
+  const allowed = options.allowedHosts ?? [];
+  if (allowed.length > 0 && !allowed.some((h) => host === h || host.endsWith(`.${h}`))) {
+    throw new MegaError('PERMISSION_DENIED', `Email API host "${host}" is not on the comm allowlist`);
+  }
+  return async (envelope) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ from: envelope.from, to: envelope.to, subject: envelope.subject, text: envelope.text }),
+        signal: controller.signal,
+      });
+      return { ok: response.ok, detail: response.ok ? undefined : `HTTP ${response.status}` };
+    } catch (err) {
+      return { ok: false, detail: String(err) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/** SMTP transport seam via the optional `nodemailer` package (dynamic import). */
+export function createSmtpTransport(options: { host: string; port?: number; secure?: boolean; auth?: { user: string; pass: string } }): EmailTransport {
+  return async (envelope) => {
+    try {
+      const moduleName = 'nodemailer';
+      const nodemailer = (await import(moduleName)) as {
+        createTransport?: (opts: unknown) => { sendMail(mail: unknown): Promise<unknown> };
+      };
+      if (!nodemailer.createTransport) return { ok: false, detail: 'nodemailer not installed' };
+      const transporter = nodemailer.createTransport({ host: options.host, port: options.port ?? 587, secure: options.secure ?? false, auth: options.auth });
+      await transporter.sendMail({ from: envelope.from, to: envelope.to, subject: envelope.subject, text: envelope.text });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, detail: `smtp: ${String(err)}` };
+    }
+  };
+}
+
 export class CommEngine {
   private readonly channels = new Map<string, Channel>();
 

@@ -80,12 +80,22 @@ export interface MegaConfig {
     defaultTarget: string;
   };
   comm: {
-    /** Channel for operator notifications: 'captured' | 'webhook' | 'none'. */
+    /** Channel for operator notifications: 'captured' | 'webhook' | 'email' | 'none'. */
     notifyChannel: string;
     /** If set, a 'webhook' channel POSTs notifications here. */
     webhookUrl: string;
     allowedHosts: string[];
     notifyEvents: string[];
+    /** Native email: when `from` is set an 'email' channel is registered. */
+    email: {
+      from: string;
+      to: string;
+      /** HTTP email-API endpoint (SendGrid/Postmark-style) to POST to. */
+      apiUrl: string;
+      /** SMTP host (uses the optional nodemailer transport when set). */
+      smtpHost: string;
+      allowedHosts: string[];
+    };
   };
   meta: {
     /** 'template' (deterministic) or 'model' (ask the AI to plan). */
@@ -149,6 +159,7 @@ export function defaultConfig(): MegaConfig {
         'workflow.approval.requested',
         'planning.project.completed',
       ],
+      email: { from: '', to: '', apiUrl: '', smtpHost: '', allowedHosts: [] },
     },
     meta: { planner: 'template' },
   };

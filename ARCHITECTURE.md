@@ -1,6 +1,6 @@
 # MegaAI Architecture
 
-MegaAI is a layered monorepo: 30 packages + 2 apps, each with a single
+MegaAI is a layered monorepo: 32 packages + 2 apps, each with a single
 responsibility, talking to each other only through the data shapes in
 `@megaai/types` and the interfaces in `@megaai/contracts`. Lower layers never
 import higher ones; the dependency graph is a strict DAG enforced by
@@ -102,10 +102,12 @@ system like this:
 | `code` | Code engine: git for delivery workspaces (auto-versioned deliveries, `git.*` agent tools) | `GitEngine`, `createGitTools` |
 | `browser` | Browser automation: pluggable driver (offline simulator + optional Playwright), `browser.*` tools gated on `net.browser` | `BrowserEngine`, `SimulatedDriver`, `createBrowserTools` |
 | `deploy` | Deployment engine: pure `deploy.plan` + approval-gated `deploy.execute`; simulated by default, Docker/Vercel/Railway adapters | `DeployEngine`, `createDeployTools` |
-| `comm` | Communication engine: channels (captured/webhook), `comm.send` tool (gated), event-driven `NotificationEngine` for operator updates | `CommEngine`, `NotificationEngine`, `createCommTool` |
+| `comm` | Communication engine: channels (captured/webhook/native email with SMTP + HTTP-API transports), `comm.send` tool (gated), event-driven `NotificationEngine` for operator updates | `CommEngine`, `EmailChannel`, `NotificationEngine`, `createCommTool` |
 | `vision` | Vision/UI testing: static HTML analysis + real headless Chromium (responsive, console errors, a11y, performance, element detection, mouse/keyboard); `vision.*` tools | `VisionTester`, `StaticTestDriver`, `BrowserTestDriver` |
 | `models` | Trainable models pack: in-process classical ML (softmax logistic regression, naive Bayes) on self-generated datasets; UI-purpose / lead-scoring / error-triage models; `model.predict` tool | `trainAllModels`, `ModelRegistry`, `LogisticRegression`, `UiPurposeModel` |
 | `desktop` | Desktop/UI automation: browser-backed screen perception (`desktop.observe` → elements + centre coordinates + purpose) and real mouse/keyboard (`desktop.act`) | `DesktopEngine`, `resolveTarget`, `createDesktopTools` |
+| `crm` | CRM engine: clients, leads (scored by the trained model), activities and invoices behind the Database contract; `crm.*` tools | `CrmEngine`, `createCrmTools` |
+| `jobs` | Recurring scheduled jobs: durable job records run on the runtime Scheduler (reports, monitors, follow-ups); `jobs.*` tools | `JobsEngine`, `createJobsTools` |
 | `agents` | Supervised agent lifecycle + 14 built-in agent kinds (coding, testing, build, review, research, browser, vision-testing, desktop, documentation, marketing, crm, devops, architecture, support) | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan generation (templates or model-backed via `makePlan`), decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan`, `parsePlanSpec` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |

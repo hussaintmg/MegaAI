@@ -190,7 +190,7 @@ later through the same `PredictiveModel` seam.
 | Core runtime | `runtime` (DI, lifecycle, health, metrics, scheduler) · `resources` |
 | AI layer | `ai` (providers, models, limits, sessions, fallback) |
 | Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` |
-| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + notifications) · `vision` (UI/responsive testing) · `desktop` (mouse/keyboard + element detection) |
+| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + email + notifications) · `vision` (UI/responsive testing) · `desktop` (mouse/keyboard + element detection) · `crm` (clients/leads/invoices) · `jobs` (recurring) |
 | Intelligence | `agents` (14 kinds) · `meta-brain` (template + model planning) · `orchestrator` · `models` (trainable ML pack) |
 | Surface | `sdk` · `apps/cli` · `apps/server` |
 
@@ -226,8 +226,8 @@ distributed workers, and the plugin marketplace.
 ## Development
 
 ```bash
-npm run build     # tsc -b across all 32 workspaces
-npm test          # build + 120 tests (node:test, all offline)
+npm run build     # tsc -b across all 34 workspaces
+npm test          # build + 133 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
 ```
@@ -235,18 +235,20 @@ npm run clean     # remove build output
 ## Status
 
 Phase 1 (Foundation) and Phase 2 (Execution) are complete. Phase 3
-(Automation) is well underway — the code engine (git-versioned deliveries),
-real build pipelines and test execution, browser automation, an
-approval-gated deployment engine, a communication + notification engine, the
-vision/UI testing engine (real headless Chromium), a trainable models pack,
-and browser-backed desktop automation (element detection + mouse/keyboard)
-are all in and tested. Phase 4 has begun with model-backed planning
+(Automation) is essentially complete — the code engine (git-versioned
+deliveries), real build pipelines and test execution, browser automation, an
+approval-gated deployment engine, a communication engine with native email
+(SMTP + HTTP-API transports) and notifications, the vision/UI testing engine
+(real headless Chromium), a trainable models pack, browser-backed desktop
+automation (element detection + mouse/keyboard), a CRM engine (clients, leads
+scored by the trained model, activities, invoices), and recurring scheduled
+jobs are all in and tested. Phase 4 has begun with model-backed planning
 (`megaai run "…" --model-planner`). See the [roadmap](./ROADMAP.md) for
 what's next (native desktop/OCR, deeper vision, semantic memory, distributed
 workers, the plugin marketplace) — all building on the contracts already in
 place.
 
-**32 workspaces (30 packages + 2 apps) · 120 tests · fully offline demo.**
+**34 workspaces (32 packages + 2 apps) · 133 tests · fully offline demo.**
 
 ## License
 

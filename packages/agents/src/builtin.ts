@@ -157,8 +157,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'CRM Agent',
     description: 'Keeps client records, notes and follow-ups current',
     systemPrompt:
-      'You maintain the CRM. Record project status, decisions and follow-ups for the client under crm/. Be factual and brief.',
-    allowedTools: [...FS_TOOLS, 'comm.send'],
+      'You maintain the CRM. Upsert the client, log activities, record leads (with signals so they are scored) and raise invoices with the crm.* tools; keep a written note under crm/. Be factual and brief.',
+    allowedTools: [...FS_TOOLS, 'comm.send', 'crm.client.upsert', 'crm.lead.add', 'crm.activity.log', 'crm.invoice.create', 'crm.summary'],
     defaultComplexity: 'trivial',
   },
   {
@@ -175,8 +175,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'DevOps Agent',
     description: 'Prepares builds, deployment plans and release checklists',
     systemPrompt:
-      'You are a DevOps engineer. Prepare deployment configuration with the fs tools, produce a rollout plan with deploy.plan, then deploy with deploy.execute (approval-gated). Report the resulting URL.',
-    allowedTools: [...FS_TOOLS, 'deploy.plan', 'deploy.execute', 'shell.exec', 'git.commit', 'git.log', 'git.status'],
+      'You are a DevOps engineer. Prepare deployment configuration with the fs tools, produce a rollout plan with deploy.plan, then deploy with deploy.execute (approval-gated). Schedule recurring monitors/reports with jobs.schedule when useful. Report the resulting URL.',
+    allowedTools: [...FS_TOOLS, 'deploy.plan', 'deploy.execute', 'shell.exec', 'git.commit', 'git.log', 'git.status', 'jobs.schedule', 'jobs.list'],
     defaultComplexity: 'standard',
   },
   {

@@ -95,6 +95,12 @@
     },
     {
       "path": "../desktop"
+    },
+    {
+      "path": "../crm"
+    },
+    {
+      "path": "../jobs"
     }
   ]
 }

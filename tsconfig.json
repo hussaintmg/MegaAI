@@ -77,6 +77,12 @@
       "path": "packages/desktop"
     },
     {
+      "path": "packages/crm"
+    },
+    {
+      "path": "packages/jobs"
+    },
+    {
       "path": "packages/context"
     },
     {

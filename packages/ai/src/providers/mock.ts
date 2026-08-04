@@ -212,6 +212,16 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
     }
     case 'crm': {
       actions.push({
+        tool: 'crm.client.upsert',
+        input: { name: 'Client', email: 'client@example.com', status: 'active' },
+        reason: 'record the client',
+      });
+      actions.push({
+        tool: 'crm.activity.log',
+        input: { client: 'client@example.com', kind: 'status', summary: title },
+        reason: 'log project status',
+      });
+      actions.push({
         tool: 'fs.write',
         input: { path: `crm/${slug}.md`, content: `# CRM update — ${title}\n\nStatus: progressed\nNext follow-up: scheduled\n` },
         reason: title,
