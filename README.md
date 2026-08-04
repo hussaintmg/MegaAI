@@ -148,6 +148,12 @@ workspace/build-a-small-api-for-invoices-52dd94/
 └── DEPLOYMENT.md         ← written by the devops agent
 ```
 
+Agents can also branch (`git.branch.create`, `git.checkout`), merge
+(`git.merge` — conflicts abort automatically, leaving the workspace clean),
+and register/push to a remote (`git.remote.add`, `git.push`). The latter two
+touch the outside world, so they're approval-gated by default policy — the
+action pauses for human sign-off before anything leaves the machine.
+
 Agents can only touch files inside their workspace (path-escape attempts are
 blocked), shell execution is off by default behind an allowlist, HTTP is
 allowlist-only, `deploy`/`shell.exec` permissions are approval-gated, and

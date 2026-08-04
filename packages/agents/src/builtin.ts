@@ -67,8 +67,19 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'Coding Agent',
     description: 'Implements features, writes and edits source code',
     systemPrompt:
-      'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders. Commit finished work with git.commit.',
-    allowedTools: [...FS_TOOLS, 'fs.delete', 'shell.exec', 'git.commit', 'git.status', 'git.diff'],
+      'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders. Commit finished work with git.commit; use git.branch.create/git.checkout/git.merge to work on a feature branch when the task calls for it.',
+    allowedTools: [
+      ...FS_TOOLS,
+      'fs.delete',
+      'shell.exec',
+      'git.commit',
+      'git.status',
+      'git.diff',
+      'git.branch.create',
+      'git.branch.list',
+      'git.checkout',
+      'git.merge',
+    ],
     defaultComplexity: 'complex',
   },
   {
@@ -130,8 +141,18 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'DevOps Agent',
     description: 'Prepares builds, deployment plans and release checklists',
     systemPrompt:
-      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated.',
-    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.commit', 'git.log', 'git.status'],
+      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated. Publishing a branch with git.push and registering remotes with git.remote.add are both approval-gated too — expect the action to pause for human sign-off.',
+    allowedTools: [
+      ...FS_TOOLS,
+      'shell.exec',
+      'git.commit',
+      'git.log',
+      'git.status',
+      'git.branch.list',
+      'git.remote.add',
+      'git.remote.list',
+      'git.push',
+    ],
     defaultComplexity: 'standard',
   },
   {

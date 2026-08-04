@@ -52,7 +52,10 @@ model these plug into already exists.
       every delivery workspace versioned automatically as a real repository
 - [x] Real test execution: the testing agent runs `node --test` through the
       gated shell tool (`expectSuccess` makes red suites fail the task)
-- [ ] Git collaboration (branches, merge, remote push behind approval)
+- [x] Git collaboration (`@megaai/code`): branches (`git.branch.create/list`,
+      `git.checkout`), merge with automatic conflict-abort (`git.merge`), and
+      remotes/push (`git.remote.add/list`, `git.push`) — the latter two
+      approval-gated by default policy (`git.remote`, `git.push`)
 - [ ] Real build pipelines (npm install/build on top of the gated shell tool)
 - [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
