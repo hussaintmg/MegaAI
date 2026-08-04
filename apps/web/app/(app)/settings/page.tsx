@@ -34,6 +34,21 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [checks, setChecks] = useState<Array<{ name: string; ok: boolean; detail: string }> | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function runDiagnostics() {
+    setChecking(true);
+    try {
+      const data = await apiGet<{ checks: Array<{ name: string; ok: boolean; detail: string }> }>('/api/diagnostics');
+      setChecks(data.checks);
+    } catch (err) {
+      if (err instanceof SessionExpired) return;
+      setChecks([{ name: 'Diagnostics', ok: false, detail: err instanceof Error ? err.message : 'failed' }]);
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function load() {
     try {
@@ -187,6 +202,37 @@ export default function SettingsPage() {
             </label>
           </div>
         </div>
+      </div>
+
+      <div className="panel">
+        <h2>Setup check</h2>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          Verifies the database, GitHub wiring (token, repo, branch, workflow) and provider keys — run this first
+          whenever a goal fails to start.
+        </div>
+        <div className="row">
+          <button className="ghost" onClick={runDiagnostics} disabled={checking}>
+            {checking ? 'Checking…' : 'Run setup check'}
+          </button>
+        </div>
+        {checks && (
+          <table style={{ marginTop: 12 }}>
+            <thead>
+              <tr><th>Check</th><th>Result</th></tr>
+            </thead>
+            <tbody>
+              {checks.map((check) => (
+                <tr key={check.name}>
+                  <td style={{ width: 170 }}>
+                    <span className={`chip ${check.ok ? 'completed' : 'failed'}`}>{check.ok ? 'ok' : 'fix'}</span>{' '}
+                    {check.name}
+                  </td>
+                  <td className="muted">{check.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="row">

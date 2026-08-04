@@ -59,9 +59,12 @@ Vercel dashboard → **Add New… → Project** → import `hussaintmg/megaai`:
 | `EXECUTOR_TOKEN` | from step 2 |
 | `GITHUB_TOKEN` | from step 3 |
 | `GITHUB_REPO` | `hussaintmg/megaai` |
-| `GITHUB_BRANCH` | branch with the workflows (`main` after merge, otherwise the working branch name) |
 | `ADMIN_EMAIL` | your login email |
 | `ADMIN_PASSWORD` | your login password (min 8 chars) |
+
+`GITHUB_BRANCH` is **optional** — leave it unset and the platform uses your
+repository's default branch automatically. Only set it if the workflows live
+on a different branch than the default.
 
 Deploy. Your platform URL will be like `https://megaai-….vercel.app`.
 
@@ -76,8 +79,8 @@ secret:
 | `EXECUTOR_TOKEN` | same value as in Vercel |
 
 > Note: the `run-goal.yml` / `schedule-tick.yml` workflows must exist on the
-> branch `GITHUB_BRANCH` points at. If you haven't merged to `main` yet, set
-> `GITHUB_BRANCH` to the working branch.
+> branch runs are dispatched from (your default branch unless you set
+> `GITHUB_BRANCH`). **Settings → Run setup check** verifies this for you.
 
 ## 6. Sign in and go
 

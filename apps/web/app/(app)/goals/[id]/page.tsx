@@ -23,6 +23,7 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
   const [goal, setGoal] = useState<GoalDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [retrying, setRetrying] = useState(false);
   const eventsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -54,6 +55,18 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
     const el = eventsRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [goal?.events.length]);
+
+  async function retry() {
+    setRetrying(true);
+    try {
+      const res = await fetch(`/api/goals/${id}/retry`, { method: 'POST' });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) setLoadError(data.error ?? 'retry failed');
+      await load();
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   if (notFound) {
     return (
@@ -90,6 +103,18 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         {goal.error && <div className="msg err" style={{ marginLeft: 0, marginTop: 8 }}>{goal.error}</div>}
         {loadError && <div className="msg err" style={{ marginLeft: 0, marginTop: 8 }}>{loadError}</div>}
+        {!live && (
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="ghost small" onClick={retry} disabled={retrying}>
+              {retrying ? 'Retrying…' : 'Run this goal again'}
+            </button>
+            {(goal.status === 'error' || goal.status === 'failed') && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                Fix the cause first — Settings → Run setup check.
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid2">
