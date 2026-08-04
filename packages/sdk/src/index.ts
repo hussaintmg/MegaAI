@@ -38,6 +38,7 @@ import { createCommandRunner, createToolRegistry, ToolRegistry } from '@megaai/t
 import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
 import { createDeployTools, DeployEngine, type DeployTarget } from '@megaai/deploy';
+import { CapturedChannel, CommEngine, createCommTool, NotificationEngine, WebhookChannel } from '@megaai/comm';
 import { ContextEngine } from '@megaai/context';
 import { MetaBrain } from '@megaai/meta-brain';
 import { Orchestrator, type GoalResult } from '@megaai/orchestrator';
@@ -82,6 +83,8 @@ export interface MegaAI {
   tools: ToolRegistry;
   contextEngine: ContextEngine;
   meta: MetaBrain;
+  comm: CommEngine;
+  notifications: NotificationEngine;
   orchestrator: Orchestrator;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -208,6 +211,24 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
       : undefined,
   });
   for (const tool of createDeployTools(deployEngine)) tools.register(tool);
+
+  // Communication: a captured channel is always present (offline default);
+  // a webhook channel is added when a URL is configured.
+  const comm = new CommEngine(clock);
+  comm.register(new CapturedChannel('captured', clock));
+  if (config.comm.webhookUrl) {
+    comm.register(new WebhookChannel('webhook', config.comm.webhookUrl, { allowedHosts: config.comm.allowedHosts, clock }));
+  }
+  const commDefaultChannel = comm.has(config.comm.notifyChannel) ? config.comm.notifyChannel : 'captured';
+  tools.register(createCommTool(comm, commDefaultChannel));
+  const notifications = new NotificationEngine({
+    bus,
+    comm,
+    channel: config.comm.notifyChannel,
+    events: config.comm.notifyEvents,
+    onError: (err) => logger.child('comm').warn('notification failed', { error: String(err) }),
+  });
+
   for (const tool of options.extraTools ?? []) tools.register(tool);
   const contextEngine = new ContextEngine({ memory, planning });
   const meta = new MetaBrain({ database, bus, clock, resources });
@@ -247,6 +268,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   container.addService({ name: 'ai-sessions' });
   container.addService({ name: 'planning' });
   container.addService({ name: 'workflow' });
+  container.addService({ name: 'notifications', start: () => notifications.start(), stop: () => notifications.stop() });
   container.addService({ name: 'orchestrator' });
 
   let started = false;
@@ -273,6 +295,8 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     tools,
     contextEngine,
     meta,
+    comm,
+    notifications,
     orchestrator,
     async start() {
       if (started) return;
@@ -322,3 +346,5 @@ export { BrowserEngine, SimulatedDriver, createBrowserTools } from '@megaai/brow
 export type { BrowserDriver, BrowserPage } from '@megaai/browser';
 export { DeployEngine, createDeployTools, DEPLOY_TARGETS } from '@megaai/deploy';
 export type { DeployTarget, DeployPlan, DeployResult } from '@megaai/deploy';
+export { CommEngine, CapturedChannel, WebhookChannel, NotificationEngine, createCommTool } from '@megaai/comm';
+export type { Channel, OutboundMessage, SendReceipt } from '@megaai/comm';

@@ -219,6 +219,20 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       summary = `Updated CRM records for "${title}".`;
       break;
     }
+    case 'support': {
+      actions.push({
+        tool: 'fs.write',
+        input: { path: `support/${slug}.md`, content: `# Support note — ${title}\n\n${description || 'Client update'}\n` },
+        reason: title,
+      });
+      actions.push({
+        tool: 'comm.send',
+        input: { to: 'client', subject: title, text: `Update on "${title}": completed and ready for your review.` },
+        reason: 'notify the client',
+      });
+      summary = `Sent a client update for "${title}".`;
+      break;
+    }
     case 'browser': {
       // Pull a URL out of the task if present, else visit a synthetic page.
       const match = `${title} ${description}`.match(/https?:\/\/[^\s)]+/);

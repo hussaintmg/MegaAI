@@ -1,0 +1,27 @@
+{
+  "name": "@megaai/comm",
+  "version": "0.1.0",
+  "description": "Communication engine: channels (captured/webhook), comm.send tool and an event-driven notification engine",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/contracts": "0.1.0",
+    "@megaai/events": "0.1.0",
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0"
+  },
+  "license": "MIT"
+}

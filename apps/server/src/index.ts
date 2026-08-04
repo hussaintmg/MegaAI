@@ -85,6 +85,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
 
+  if (method === 'GET' && path === '/api/notifications') {
+    const channel = megaai.comm.get('captured');
+    const messages = channel && 'messages' in channel ? (channel as { messages: unknown[] }).messages : [];
+    json(res, 200, messages.slice(-50).reverse());
+    return;
+  }
+
   if (method === 'GET' && path === '/api/health') {
     json(res, 200, await megaai.container.healthAll());
     return;

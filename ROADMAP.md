@@ -70,10 +70,16 @@ model these plug into already exists.
       with a URL), Docker/Vercel/Railway/static adapters as command lists run by
       an allowlisted runner only when a shell is enabled
 - [ ] More targets (Cloudflare, Kubernetes, VPS) + live URL/health readback
-- [ ] Communication channels (email, WhatsApp, Slack, Discord, Telegram) behind `comm.send`
+- [x] Communication engine v1 (`@megaai/comm`): one `send()` channel shape
+      (captured default + webhook for Slack/Discord/Telegram); `comm.send`
+      tool on the approval-gated `comm.send` permission; support agent + CRM
+      client messaging
+- [x] Notification engine: watches lifecycle events (goal/project/approval)
+      and pushes operator updates to the configured channel — surfaced at
+      `GET /api/notifications`
+- [ ] Native email (SMTP) and per-service channel adapters
 - [ ] CRM integrations (clients, invoices, leads, meetings, payments)
 - [ ] Scheduler-driven recurring jobs (reports, monitors, follow-ups)
-- [ ] Notification engine (progress pings to the human's channels)
 
 ## Phase 4 — Intelligence layer 🔮
 

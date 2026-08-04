@@ -79,6 +79,14 @@ export interface MegaConfig {
     /** simulated | static | docker | vercel | railway */
     defaultTarget: string;
   };
+  comm: {
+    /** Channel for operator notifications: 'captured' | 'webhook' | 'none'. */
+    notifyChannel: string;
+    /** If set, a 'webhook' channel POSTs notifications here. */
+    webhookUrl: string;
+    allowedHosts: string[];
+    notifyEvents: string[];
+  };
 }
 
 export function defaultConfig(): MegaConfig {
@@ -127,6 +135,17 @@ export function defaultConfig(): MegaConfig {
     },
     server: { host: '127.0.0.1', port: 4100 },
     deploy: { defaultTarget: 'simulated' },
+    comm: {
+      notifyChannel: 'captured',
+      webhookUrl: '',
+      allowedHosts: [],
+      notifyEvents: [
+        'orchestrator.goal.completed',
+        'orchestrator.goal.failed',
+        'workflow.approval.requested',
+        'planning.project.completed',
+      ],
+    },
   };
 }
 

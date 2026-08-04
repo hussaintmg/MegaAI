@@ -140,7 +140,16 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     description: 'Keeps client records, notes and follow-ups current',
     systemPrompt:
       'You maintain the CRM. Record project status, decisions and follow-ups for the client under crm/. Be factual and brief.',
-    allowedTools: FS_TOOLS,
+    allowedTools: [...FS_TOOLS, 'comm.send'],
+    defaultComplexity: 'trivial',
+  },
+  {
+    kind: 'support',
+    name: 'Support Agent',
+    description: 'Communicates with clients and answers their questions',
+    systemPrompt:
+      'You are a client support agent. Answer clearly and send updates to the client with comm.send (approval-gated). Keep a written record under support/.',
+    allowedTools: [...FS_TOOLS, 'comm.send'],
     defaultComplexity: 'trivial',
   },
   {
