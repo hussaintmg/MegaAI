@@ -63,7 +63,14 @@ model these plug into already exists.
       click/screenshot` tools on the `net.browser` permission, host-allowlisted;
       browser agent kind
 - [ ] Browser sessions: profiles, tabs, cookies, logins, downloads
-- [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
+- [x] Desktop / UI automation v1 (`@megaai/desktop`): browser-backed screen
+      perception — `desktop.observe` returns every interactive element with its
+      geometry, centre coordinates and *purpose* (sharing the trained
+      UI-purpose model) — plus real mouse/keyboard through `desktop.act` (click
+      by purpose/text/selector/coordinates, type, press, scroll, wait), on the
+      `desktop` permission; a desktop-automation agent kind. The
+      `DesktopSession` seam lets a native OS driver slot in later.
+- [ ] Native desktop driver: OS-level mouse/keyboard, clipboard, OCR, windows
 - [x] Vision / UI testing engine (`@megaai/vision`): static HTML analysis
       (always on) + real headless Chromium (via `playwright-core` against the
       pre-installed browser) — responsive overflow across viewports, captured

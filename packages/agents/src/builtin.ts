@@ -126,6 +126,15 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     defaultComplexity: 'standard',
   },
   {
+    kind: 'desktop',
+    name: 'Desktop Automation Agent',
+    description: 'Sees the screen (element detection + purpose) and drives mouse/keyboard to complete UI flows',
+    systemPrompt:
+      'You are a UI automation agent. Use desktop.observe to see the page — every element with its purpose and centre coordinates — then desktop.act to click by purpose/text and type where needed to complete the flow. Report what you did and whether it worked.',
+    allowedTools: ['desktop.observe', 'desktop.act', 'vision.audit', 'fs.read', 'fs.list', 'model.predict'],
+    defaultComplexity: 'standard',
+  },
+  {
     kind: 'documentation',
     name: 'Documentation Agent',
     description: 'Writes user and developer documentation',

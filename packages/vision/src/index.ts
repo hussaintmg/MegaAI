@@ -24,6 +24,9 @@ import { MegaError } from '@megaai/types';
 import type { Tool } from '@megaai/contracts';
 import { launchChromium, type PwPage } from './launch.js';
 
+export { launchChromium, discoverChromium } from './launch.js';
+export type { PwPage, LaunchedBrowser } from './launch.js';
+
 /* ------------------------------------------------------------------ *
  * Report + element types
  * ------------------------------------------------------------------ */

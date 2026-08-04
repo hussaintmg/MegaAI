@@ -246,6 +246,11 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       summary = `Ran visual + responsive testing on the built UI for "${title}".`;
       break;
     }
+    case 'desktop': {
+      actions.push({ tool: 'desktop.observe', input: { file: 'public/index.html' }, reason: title });
+      summary = `Observed the UI and identified its interactive elements for "${title}".`;
+      break;
+    }
     case 'research':
     case 'review':
     case 'architecture':

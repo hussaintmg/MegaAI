@@ -52,7 +52,7 @@ flowchart TB
     ORC --> WF[Workflow Engine<br/>steps · retries · checkpoints · approvals]
     WF --> POL[Policy Engine<br/>rules · time windows · approvals]
     ORC --> AR[Agent Runtime<br/>spawn · heartbeat · recover]
-    AR --> AG[Agents · 13 kinds<br/>coding · testing · build · review · research · browser · vision-testing<br/>docs · marketing · crm · devops · architecture · support]
+    AR --> AG[Agents · 14 kinds<br/>coding · testing · build · review · research · browser · vision-testing · desktop<br/>docs · marketing · crm · devops · architecture · support]
     AG --> CTX[Context Engine] --> MEM[Memory + Knowledge<br/>vector search]
     AG --> PR[Prompt Engine]
     AG --> AI[AI Session Manager<br/>fallback: anthropic → openai → gemini → mock]
@@ -190,8 +190,8 @@ later through the same `PredictiveModel` seam.
 | Core runtime | `runtime` (DI, lifecycle, health, metrics, scheduler) · `resources` |
 | AI layer | `ai` (providers, models, limits, sessions, fallback) |
 | Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` |
-| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + notifications) · `vision` (UI/responsive testing) |
-| Intelligence | `agents` (13 kinds) · `meta-brain` (template + model planning) · `orchestrator` · `models` (trainable ML pack) |
+| Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + notifications) · `vision` (UI/responsive testing) · `desktop` (mouse/keyboard + element detection) |
+| Intelligence | `agents` (14 kinds) · `meta-brain` (template + model planning) · `orchestrator` · `models` (trainable ML pack) |
 | Surface | `sdk` · `apps/cli` · `apps/server` |
 
 ## Extending MegaAI
@@ -226,8 +226,8 @@ distributed workers, and the plugin marketplace.
 ## Development
 
 ```bash
-npm run build     # tsc -b across all 31 workspaces
-npm test          # build + 115 tests (node:test, all offline)
+npm run build     # tsc -b across all 32 workspaces
+npm test          # build + 120 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
 ```
@@ -238,14 +238,15 @@ Phase 1 (Foundation) and Phase 2 (Execution) are complete. Phase 3
 (Automation) is well underway — the code engine (git-versioned deliveries),
 real build pipelines and test execution, browser automation, an
 approval-gated deployment engine, a communication + notification engine, the
-vision/UI testing engine (real headless Chromium), and a trainable models
-pack are all in and tested. Phase 4 has begun with model-backed planning
+vision/UI testing engine (real headless Chromium), a trainable models pack,
+and browser-backed desktop automation (element detection + mouse/keyboard)
+are all in and tested. Phase 4 has begun with model-backed planning
 (`megaai run "…" --model-planner`). See the [roadmap](./ROADMAP.md) for
-what's next (desktop automation, deeper vision, semantic memory, distributed
+what's next (native desktop/OCR, deeper vision, semantic memory, distributed
 workers, the plugin marketplace) — all building on the contracts already in
 place.
 
-**31 workspaces (29 packages + 2 apps) · 115 tests · fully offline demo.**
+**32 workspaces (30 packages + 2 apps) · 120 tests · fully offline demo.**
 
 ## License
 

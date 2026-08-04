@@ -74,6 +74,9 @@
       "path": "packages/models"
     },
     {
+      "path": "packages/desktop"
+    },
+    {
       "path": "packages/context"
     },
     {

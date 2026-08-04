@@ -92,6 +92,9 @@
     },
     {
       "path": "../models"
+    },
+    {
+      "path": "../desktop"
     }
   ]
 }

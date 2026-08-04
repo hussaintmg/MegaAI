@@ -1,0 +1,27 @@
+{
+  "name": "@megaai/desktop",
+  "version": "0.1.0",
+  "description": "Desktop/UI automation: browser-backed screen perception (element detection + purpose) and real mouse/keyboard control",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/contracts": "0.1.0",
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0",
+    "@megaai/vision": "0.1.0"
+  },
+  "license": "MIT"
+}

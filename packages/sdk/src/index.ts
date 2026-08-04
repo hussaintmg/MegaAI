@@ -39,6 +39,7 @@ import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
 import { createVisionTools, VisionTester } from '@megaai/vision';
 import { createModelTools, loadRegistry, ModelRegistry as ModelPackRegistry } from '@megaai/models';
+import { createDesktopTools, DesktopEngine } from '@megaai/desktop';
 import { createDeployTools, DeployEngine, type DeployTarget } from '@megaai/deploy';
 import { CapturedChannel, CommEngine, createCommTool, NotificationEngine, WebhookChannel } from '@megaai/comm';
 import { ContextEngine } from '@megaai/context';
@@ -89,6 +90,7 @@ export interface MegaAI {
   notifications: NotificationEngine;
   vision: VisionTester;
   models: ModelPackRegistry;
+  desktop: DesktopEngine;
   orchestrator: Orchestrator;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -218,6 +220,14 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   });
   for (const tool of createVisionTools(vision)) tools.register(tool);
   for (const tool of createModelTools(models)) tools.register(tool);
+  // Desktop/UI automation: browser-backed screen perception (element detection
+  // + purpose, sharing the trained UI-purpose model) plus real mouse/keyboard.
+  const desktop = new DesktopEngine({
+    classifier: uiModel ? uiModel.asClassifier() : undefined,
+    allowedHosts: config.security.browserAllowedHosts,
+    logger: (message, fields) => logger.child('desktop').info(message, fields),
+  });
+  for (const tool of createDesktopTools(desktop)) tools.register(tool);
   // Deploy: real execution only when a shell is allowed (and the binary is on
   // the allowlist); otherwise every target simulates. Publishing stays behind
   // the approval-gated `deploy` permission regardless.
@@ -325,6 +335,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     notifications,
     vision,
     models,
+    desktop,
     orchestrator,
     async start() {
       if (started) return;
@@ -392,3 +403,5 @@ export {
   createModelTools,
 } from '@megaai/models';
 export type { PredictiveModel, Prediction, ModelBundle } from '@megaai/models';
+export { DesktopEngine, createDesktopTools, resolveTarget, centerOf } from '@megaai/desktop';
+export type { ScreenObservation, DesktopElement, DesktopStep, DesktopTarget } from '@megaai/desktop';
