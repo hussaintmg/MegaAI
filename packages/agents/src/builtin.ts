@@ -81,6 +81,15 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     defaultComplexity: 'standard',
   },
   {
+    kind: 'build',
+    name: 'Build Agent',
+    description: 'Verifies the project builds — installs dependencies and runs the build pipeline',
+    systemPrompt:
+      'You are a build engineer. Verify the project actually builds using pipeline.run (install → build → syntax-check). Report which steps passed; a failing step must fail the task, not be glossed over.',
+    allowedTools: [...FS_TOOLS, 'pipeline.run', 'shell.exec', 'git.status'],
+    defaultComplexity: 'standard',
+  },
+  {
     kind: 'review',
     name: 'Review Agent',
     description: 'Reviews code and plans for defects and risks',

@@ -52,8 +52,11 @@ model these plug into already exists.
       every delivery workspace versioned automatically as a real repository
 - [x] Real test execution: the testing agent runs `node --test` through the
       gated shell tool (`expectSuccess` makes red suites fail the task)
+- [x] Real build pipelines: `pipeline.run` (ordered, fail-fast, allowlisted)
+      + a build agent that syntax-checks every source file; a broken build
+      fails the task and triggers recovery
 - [ ] Git collaboration (branches, merge, remote push behind approval)
-- [ ] Real build pipelines (npm install/build on top of the gated shell tool)
+- [ ] `npm install`/`npm build` pipelines for dependency-bearing projects
 - [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
 - [ ] Vision (screenshots, UI understanding, image analysis)

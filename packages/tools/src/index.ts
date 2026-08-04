@@ -201,48 +201,108 @@ export interface ShellToolOptions {
   timeoutMs?: number;
 }
 
+interface RunOutcome {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Shared, allowlist-checked, no-shell-interpolation command runner. */
+async function runBinary(
+  options: ShellToolOptions,
+  cwd: string,
+  command: string,
+  args: string[],
+): Promise<RunOutcome> {
+  if (!options.enabled) {
+    throw new MegaError('PERMISSION_DENIED', 'Shell execution is disabled by configuration');
+  }
+  if (!options.allowlist.includes(command)) {
+    throw new MegaError('PERMISSION_DENIED', `Binary "${command}" is not on the shell allowlist`);
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync(command, args, {
+      cwd,
+      timeout: options.timeoutMs ?? 60_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return { exitCode: 0, stdout: stdout.slice(0, 50_000), stderr: stderr.slice(0, 50_000) };
+  } catch (err) {
+    const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
+    return {
+      exitCode: typeof e.code === 'number' ? e.code : 1,
+      stdout: (e.stdout ?? '').slice(0, 50_000),
+      stderr: (e.stderr ?? e.message ?? '').slice(0, 50_000),
+    };
+  }
+}
+
 export function createShellTool(options: ShellToolOptions): Tool {
   return {
     name: 'shell.exec',
     description: 'Run an allowlisted binary inside the workspace (args as array, no shell interpolation)',
-    inputSchema: { command: 'string (allowlisted binary)', args: 'string[] (optional)' },
+    inputSchema: { command: 'string (allowlisted binary)', args: 'string[] (optional)', expectSuccess: 'boolean (optional)' },
     permissions: ['shell.exec'],
     async execute(input, ctx) {
-      if (!options.enabled) {
-        throw new MegaError('PERMISSION_DENIED', 'Shell execution is disabled by configuration');
-      }
       const command = str(input, 'command');
-      if (!options.allowlist.includes(command)) {
-        throw new MegaError('PERMISSION_DENIED', `Binary "${command}" is not on the shell allowlist`);
-      }
       const args = Array.isArray(input.args) ? input.args.map(String) : [];
+      const outcome = await runBinary(options, ctx.workspaceRoot, command, args);
       // expectSuccess turns a non-zero exit into a hard failure so callers
       // (e.g. the testing agent's real test runs) can't silently pass.
-      const expectSuccess = input.expectSuccess === true;
-      try {
-        const { stdout, stderr } = await execFileAsync(command, args, {
-          cwd: ctx.workspaceRoot,
-          timeout: options.timeoutMs ?? 60_000,
-          maxBuffer: 4 * 1024 * 1024,
-        });
-        return { exitCode: 0, stdout: stdout.slice(0, 50_000), stderr: stderr.slice(0, 50_000) };
-      } catch (err) {
-        const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
-        const exitCode = typeof e.code === 'number' ? e.code : 1;
-        if (expectSuccess) {
-          throw new MegaError(
-            'INTERNAL',
-            `command "${command}" failed (exit ${exitCode}): ${(e.stderr ?? e.stdout ?? e.message ?? '').slice(0, 2_000)}`,
-          );
-        }
-        return {
-          exitCode,
-          stdout: (e.stdout ?? '').slice(0, 50_000),
-          stderr: (e.stderr ?? e.message ?? '').slice(0, 50_000),
-        };
+      if (input.expectSuccess === true && outcome.exitCode !== 0) {
+        throw new MegaError(
+          'INTERNAL',
+          `command "${command}" failed (exit ${outcome.exitCode}): ${(outcome.stderr || outcome.stdout).slice(0, 2_000)}`,
+        );
       }
+      return outcome as unknown as JsonValue;
     },
   };
+}
+
+/**
+ * pipeline.run — an ordered, fail-fast sequence of allowlisted commands run
+ * as one audited action (build → test → package). Stops at the first
+ * non-zero exit and reports every step's outcome, so a broken build fails
+ * the task and triggers MegaAI's retry/recovery path.
+ */
+export function createPipelineTool(options: ShellToolOptions): Tool {
+  return {
+    name: 'pipeline.run',
+    description: 'Run an ordered list of allowlisted commands, stopping at the first failure',
+    inputSchema: {
+      steps: '[{ name?: string, command: string, args?: string[] }] — run in order',
+    },
+    permissions: ['shell.exec'],
+    async execute(input, ctx) {
+      const rawSteps = Array.isArray(input.steps) ? input.steps : [];
+      if (rawSteps.length === 0) throw new MegaError('INVALID_INPUT', 'pipeline.run needs at least one step');
+      if (rawSteps.length > 20) throw new MegaError('INVALID_INPUT', 'pipeline.run allows at most 20 steps');
+      const results: Array<{ name: string; command: string; exitCode: number; ok: boolean; stderr: string }> = [];
+      for (const raw of rawSteps) {
+        if (!isRecord(raw)) throw new MegaError('INVALID_INPUT', 'each pipeline step must be an object');
+        const command = typeof raw.command === 'string' ? raw.command : '';
+        if (!command) throw new MegaError('INVALID_INPUT', 'each pipeline step needs a "command"');
+        const args = Array.isArray(raw.args) ? raw.args.map(String) : [];
+        const name = typeof raw.name === 'string' ? raw.name : command;
+        const outcome = await runBinary(options, ctx.workspaceRoot, command, args);
+        const stepOk = outcome.exitCode === 0;
+        results.push({ name, command, exitCode: outcome.exitCode, ok: stepOk, stderr: outcome.stderr.slice(0, 2_000) });
+        if (!stepOk) {
+          // Fail fast: a broken step fails the whole action so the task fails
+          // and MegaAI's retry/recovery path engages.
+          throw new MegaError('INTERNAL', `pipeline step "${name}" failed (exit ${outcome.exitCode}): ${outcome.stderr.slice(0, 1_000)}`, {
+            steps: results as unknown as JsonValue,
+          });
+        }
+      }
+      return { ok: true, steps: results as unknown as JsonValue } as unknown as JsonValue;
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export const timeTool: Tool = {
@@ -264,13 +324,18 @@ export interface BuiltinToolOptions {
 
 /** The standard tool set, honouring the security configuration. */
 export function createBuiltinTools(options: BuiltinToolOptions = {}): Tool[] {
+  const shellOptions: ShellToolOptions = {
+    enabled: options.allowShell ?? false,
+    allowlist: options.shellAllowlist ?? [],
+  };
   return [
     fsWriteTool,
     fsReadTool,
     fsListTool,
     fsDeleteTool,
     createHttpTool({ allowedHosts: options.httpAllowedHosts ?? [] }),
-    createShellTool({ enabled: options.allowShell ?? false, allowlist: options.shellAllowlist ?? [] }),
+    createShellTool(shellOptions),
+    createPipelineTool(shellOptions),
     timeTool,
   ];
 }

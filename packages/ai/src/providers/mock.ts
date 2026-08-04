@@ -147,6 +147,32 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       }
       break;
     }
+    case 'build': {
+      if (meta.shellEnabled === true) {
+        // Write a real, side-effect-free syntax checker and run it as a
+        // pipeline step. It spawns `node --check` per file (parse only, no
+        // execution), so a genuine syntax error fails the build task.
+        actions.push({
+          tool: 'fs.write',
+          input: {
+            path: 'build-check.mjs',
+            content: `import { readdirSync, statSync } from 'node:fs';\nimport { join } from 'node:path';\nimport { spawnSync } from 'node:child_process';\n\nfunction walk(dir) {\n  const out = [];\n  for (const entry of readdirSync(dir)) {\n    if (entry === 'node_modules' || entry === '.git') continue;\n    const full = join(dir, entry);\n    if (statSync(full).isDirectory()) out.push(...walk(full));\n    else if (entry.endsWith('.js') || entry.endsWith('.mjs')) out.push(full);\n  }\n  return out;\n}\n\nlet failed = 0;\nfor (const file of walk('.')) {\n  const result = spawnSync(process.execPath, ['--check', file]);\n  if (result.status !== 0) {\n    failed += 1;\n    process.stderr.write('syntax error: ' + file + '\\n' + (result.stderr?.toString() ?? ''));\n  }\n}\nconsole.log('build-check: ' + (failed === 0 ? 'all files parse' : failed + ' file(s) failed'));\nprocess.exit(failed === 0 ? 0 : 1);\n`,
+          },
+          reason: 'build verification script',
+        });
+        actions.push({
+          tool: 'pipeline.run',
+          input: {
+            steps: [{ name: 'syntax-check', command: 'node', args: ['build-check.mjs'] }],
+          },
+          reason: 'verify the project builds',
+        });
+        summary = `Verified the build for "${title}": every source file parses cleanly.`;
+      } else {
+        summary = `Build verification for "${title}" skipped (shell disabled in this environment).`;
+      }
+      break;
+    }
     case 'documentation': {
       actions.push({
         tool: 'fs.write',

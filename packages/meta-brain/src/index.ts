@@ -108,6 +108,7 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
         {
           name: 'Quality',
           tasks: [
+            task('Build verification', 'build', 'standard', 'Verify every source file builds and parses cleanly'),
             task('Automated test suite', 'testing', 'standard', 'Tests covering auth, catalog and checkout behaviour'),
             task('Code review pass', 'review', 'standard', 'Review all modules for defects and risks'),
           ],
@@ -149,6 +150,7 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
         {
           name: 'Quality',
           tasks: [
+            task('Build verification', 'build', 'standard', 'Verify every module builds and parses cleanly'),
             task('Automated test suite', 'testing', 'standard', 'Module and integration tests'),
             task('Code review pass', 'review', 'standard', 'Review all modules'),
           ],
@@ -181,6 +183,7 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
         {
           name: 'Quality & launch',
           tasks: [
+            task('Build verification', 'build', 'standard', 'Verify the service builds and parses cleanly'),
             task('Automated test suite', 'testing', 'standard', 'Endpoint tests including error paths'),
             task('Project documentation', 'documentation', 'trivial', 'API reference and quickstart'),
             task('Deployment preparation', 'devops', 'standard', 'Deployment plan and configs'),

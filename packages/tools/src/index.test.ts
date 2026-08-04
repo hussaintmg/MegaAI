@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MegaError } from '@megaai/types';
 import type { ToolContext } from '@megaai/contracts';
-import { createShellTool, createHttpTool, createToolRegistry, fsReadTool, fsWriteTool, resolveInWorkspace } from './index.js';
+import { createPipelineTool, createShellTool, createHttpTool, createToolRegistry, fsReadTool, fsWriteTool, resolveInWorkspace } from './index.js';
 
 function makeWorkspace(): { ctx: ToolContext; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'megaai-ws-'));
@@ -61,6 +61,47 @@ test('shell tool is deny-by-default and allowlisted when enabled', async () => {
 test('http tool refuses hosts off the allowlist', async () => {
   const http = createHttpTool({ allowedHosts: ['example.com'] });
   await assert.rejects(http.execute({ url: 'https://evil.test/steal' }, { workspaceRoot: '/tmp' }), /allowlist/);
+});
+
+test('pipeline runs ordered steps and fails fast on a broken step', async () => {
+  const { ctx, cleanup } = makeWorkspace();
+  try {
+    const pipeline = createPipelineTool({ enabled: true, allowlist: ['node'] });
+
+    const ok = (await pipeline.execute(
+      { steps: [{ name: 'version', command: 'node', args: ['--version'] }] },
+      ctx,
+    )) as { ok: boolean; steps: unknown[] };
+    assert.equal(ok.ok, true);
+    assert.equal(ok.steps.length, 1);
+
+    // Second step fails → whole pipeline throws, and the good first step is
+    // reported in the error details.
+    await assert.rejects(
+      pipeline.execute(
+        {
+          steps: [
+            { name: 'good', command: 'node', args: ['--version'] },
+            { name: 'bad', command: 'node', args: ['-e', 'process.exit(3)'] },
+            { name: 'never', command: 'node', args: ['--version'] },
+          ],
+        },
+        ctx,
+      ),
+      (err: unknown) => {
+        assert.match(String(err), /pipeline step "bad" failed/);
+        return true;
+      },
+    );
+
+    // Non-allowlisted binaries are refused.
+    await assert.rejects(
+      pipeline.execute({ steps: [{ command: 'rm', args: ['-rf', '/'] }] }, ctx),
+      /not on the shell allowlist/,
+    );
+  } finally {
+    cleanup();
+  }
 });
 
 test('registry exposes specs and prompt catalog filtered by allowlist', () => {
