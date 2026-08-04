@@ -22,5 +22,9 @@
     "@megaai/types": "0.1.0",
     "@megaai/utils": "0.1.0"
   },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.20.0",
+    "pngjs": "^7.0.0"
+  },
   "license": "MIT"
 }

@@ -20,6 +20,7 @@ import { ModelRegistry } from './models.js';
 
 export * from './core.js';
 export * from './models.js';
+export * from './onnx.js';
 
 /* ------------------------------------------------------------------ *
  * Agent-facing tools

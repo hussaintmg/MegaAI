@@ -46,6 +46,10 @@ export interface Point {
 /** A detected element plus its clickable centre coordinate. */
 export interface DesktopElement extends UiElement {
   center?: Point;
+  /** Detector confidence, when the element came from the pixel model. */
+  confidence?: number;
+  /** Raw class the pixel model assigned (button, input, …). */
+  detectedAs?: string;
 }
 
 export interface ScreenObservation {
@@ -53,6 +57,8 @@ export interface ScreenObservation {
   width: number;
   height: number;
   elements: DesktopElement[];
+  /** Where the elements came from: the DOM, or the trained pixel model. */
+  source: 'dom' | 'pixels';
 }
 
 /** How to point at an element: by coordinates, selector, purpose, or text. */
@@ -173,22 +179,42 @@ const PAGE_SIZE = `(() => ({ width: window.innerWidth, height: window.innerHeigh
  * DesktopEngine
  * ------------------------------------------------------------------ */
 
+/**
+ * Pixel-level element detection — the trained YOLO model behind
+ * `@megaai/models`'s `OnnxDetector`, injected so this package keeps no heavy
+ * dependency of its own. When absent, everything falls back to the DOM.
+ */
+export interface PixelDetector {
+  detect(png: Buffer): Promise<
+    Array<{ label: string; confidence: number; x: number; y: number; width: number; height: number; center: { x: number; y: number } }>
+  >;
+}
+
 export interface DesktopEngineOptions {
   classifier?: PurposeClassifier;
   /** When non-empty, `url` inputs must be on one of these hosts. */
   allowedHosts?: string[];
+  /** Trained pixel detector; enables `observe({ pixels: true })`. */
+  pixelDetector?: PixelDetector;
   logger?: (message: string, fields?: JsonObject) => void;
 }
 
 export class DesktopEngine {
   private readonly classify: PurposeClassifier;
   private readonly allowedHosts: string[];
+  private readonly pixelDetector?: PixelDetector;
   private readonly logger?: (message: string, fields?: JsonObject) => void;
 
   constructor(options: DesktopEngineOptions = {}) {
     this.classify = options.classifier ?? classifyPurposeHeuristic;
     this.allowedHosts = options.allowedHosts ?? [];
+    this.pixelDetector = options.pixelDetector;
     this.logger = options.logger;
+  }
+
+  /** Whether a trained pixel detector is wired in. */
+  get hasPixelVision(): boolean {
+    return this.pixelDetector !== undefined;
   }
 
   private checkHost(input: DesktopInput): void {
@@ -228,13 +254,41 @@ export class DesktopEngine {
     return input.label ?? input.url ?? 'inline html';
   }
 
-  /** See the screen: every interactive element, its box, centre and purpose. */
-  async observe(input: DesktopInput): Promise<ScreenObservation> {
+  /**
+   * See the screen: every interactive element, its box, centre and purpose.
+   *
+   * With `pixels: true` and a trained detector wired in, elements are found
+   * from the screenshot alone — no DOM — which is what lets the same code
+   * drive UIs this process cannot introspect.
+   */
+  async observe(input: DesktopInput, options: { pixels?: boolean } = {}): Promise<ScreenObservation> {
     return this.withPage(input, async (page) => {
       const size = await page.evaluate<{ width: number; height: number }>(PAGE_SIZE);
-      const elements = await this.scan(page);
-      this.logger?.('desktop: observed screen', { target: this.label(input), elements: elements.length });
-      return { target: this.label(input), width: size.width, height: size.height, elements };
+      let elements: DesktopElement[];
+      let source: ScreenObservation['source'] = 'dom';
+
+      if (options.pixels && this.pixelDetector) {
+        const shot = await page.screenshot({ type: 'png' });
+        const found = await this.pixelDetector.detect(shot);
+        elements = found.map((box) => {
+          const features: ElementFeatures = { tag: box.label, text: '' };
+          return {
+            ...features,
+            purpose: this.classify(features),
+            box: { x: box.x, y: box.y, width: box.width, height: box.height },
+            center: box.center,
+            confidence: box.confidence,
+            detectedAs: box.label,
+          };
+        });
+        source = 'pixels';
+      } else {
+        if (options.pixels) this.logger?.('desktop: no pixel detector wired in, using the DOM');
+        elements = await this.scan(page);
+      }
+
+      this.logger?.('desktop: observed screen', { target: this.label(input), elements: elements.length, source });
+      return { target: this.label(input), width: size.width, height: size.height, elements, source };
     });
   }
 
@@ -255,7 +309,11 @@ export class DesktopEngine {
         }
       }
       const size = await page.evaluate<{ width: number; height: number }>(PAGE_SIZE);
-      return { ok: results.every((r) => r.ok), steps: results, observation: { target: this.label(input), width: size.width, height: size.height, elements } };
+      return {
+        ok: results.every((r) => r.ok),
+        steps: results,
+        observation: { target: this.label(input), width: size.width, height: size.height, elements, source: 'dom' },
+      };
     });
   }
 
@@ -367,12 +425,21 @@ const UNAVAILABLE = 'PROVIDER_UNAVAILABLE';
 export function createDesktopTools(engine: DesktopEngine): Tool[] {
   const observe: Tool = {
     name: 'desktop.observe',
-    description: 'See the screen: detect every interactive element with its box, centre coordinates and purpose (url | workspace file | html)',
-    inputSchema: { url: 'string (optional)', file: 'string (workspace-relative, optional)', html: 'string (optional)' },
+    description:
+      'See the screen: detect every interactive element with its box, centre coordinates and purpose (url | workspace file | html). ' +
+      'Set pixels:true to detect from the screenshot with the trained vision model instead of the DOM.',
+    inputSchema: {
+      url: 'string (optional)',
+      file: 'string (workspace-relative, optional)',
+      html: 'string (optional)',
+      pixels: 'boolean (optional; use the trained pixel detector)',
+    },
     permissions: ['desktop'],
     async execute(input, ctx) {
       try {
-        return (await engine.observe(resolveInput(input, ctx.workspaceRoot))) as unknown as JsonValue;
+        return (await engine.observe(resolveInput(input, ctx.workspaceRoot), {
+          pixels: input.pixels === true,
+        })) as unknown as JsonValue;
       } catch (err) {
         if (err instanceof MegaError && err.code === UNAVAILABLE) {
           return { available: false, elements: [], note: 'no headless browser available for desktop automation' } as unknown as JsonValue;

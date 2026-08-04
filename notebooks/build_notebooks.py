@@ -170,8 +170,15 @@ for base, dirs, fs in os.walk("."):
 assert root, "Could not find the dataset (no data.yaml with an images/ folder)"
 
 import yaml
-_names = yaml.safe_load(open(os.path.join(root, "data.yaml")))["names"]
+_cfg = yaml.safe_load(open(os.path.join(root, "data.yaml")))
+_names = _cfg["names"]
 CLASSES = [_names[i] for i in sorted(_names)] if isinstance(_names, dict) else list(_names)
+
+# Ultralytics resolves a relative `path` against its own datasets_dir, and the
+# absolute one baked in at generation time points at another machine — so pin
+# it to where the dataset actually landed here.
+_cfg["path"] = root
+yaml.safe_dump(_cfg, open(os.path.join(root, "data.yaml"), "w"), sort_keys=False)
 
 print("dataset root:", root)
 print("classes     :", CLASSES)

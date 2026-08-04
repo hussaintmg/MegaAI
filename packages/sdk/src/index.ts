@@ -38,7 +38,13 @@ import { createCommandRunner, createToolRegistry, ToolRegistry } from '@megaai/t
 import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
 import { createVisionTools, VisionTester } from '@megaai/vision';
-import { createModelTools, loadRegistry, ModelRegistry as ModelPackRegistry } from '@megaai/models';
+import {
+  createModelTools,
+  loadDeepModels,
+  loadRegistry,
+  ModelRegistry as ModelPackRegistry,
+  type DeepModels,
+} from '@megaai/models';
 import { createDesktopTools, DesktopEngine } from '@megaai/desktop';
 import { CrmEngine, createCrmTools } from '@megaai/crm';
 import { createJobsTools, JobsEngine } from '@megaai/jobs';
@@ -261,9 +267,28 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   for (const tool of createModelTools(models)) tools.register(tool);
   // Desktop/UI automation: browser-backed screen perception (element detection
   // + purpose, sharing the trained UI-purpose model) plus real mouse/keyboard.
+  // Trained deep models (YOLO detector + classifiers) if their ONNX weights
+  // are in .megaai/models/. Loaded lazily on first use so boot stays fast and
+  // a missing onnxruntime never blocks startup.
+  let deepModelsPromise: Promise<DeepModels> | undefined;
+  const deep = (): Promise<DeepModels> => {
+    deepModelsPromise ??= loadDeepModels(join(config.system.dataDir, 'models')).catch((err) => {
+      logger.child('models').warn('deep models unavailable', { error: String(err) });
+      return {} as DeepModels;
+    });
+    return deepModelsPromise;
+  };
+
   const desktop = new DesktopEngine({
     classifier: uiModel ? uiModel.asClassifier() : undefined,
     allowedHosts: config.security.browserAllowedHosts,
+    pixelDetector: {
+      async detect(png) {
+        const detector = (await deep()).detector;
+        if (!detector) return [];
+        return detector.detect(png);
+      },
+    },
     logger: (message, fields) => logger.child('desktop').info(message, fields),
   });
   for (const tool of createDesktopTools(desktop)) tools.register(tool);
