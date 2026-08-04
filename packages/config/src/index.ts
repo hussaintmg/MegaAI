@@ -87,6 +87,10 @@ export interface MegaConfig {
     allowedHosts: string[];
     notifyEvents: string[];
   };
+  meta: {
+    /** 'template' (deterministic) or 'model' (ask the AI to plan). */
+    planner: string;
+  };
 }
 
 export function defaultConfig(): MegaConfig {
@@ -146,6 +150,7 @@ export function defaultConfig(): MegaConfig {
         'planning.project.completed',
       ],
     },
+    meta: { planner: 'template' },
   };
 }
 

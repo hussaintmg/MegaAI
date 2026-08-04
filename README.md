@@ -204,11 +204,16 @@ npm run clean     # remove build output
 
 ## Status
 
-Phase 1 (Foundation) and Phase 2 (Execution) of the [roadmap](./ROADMAP.md)
-are implemented and tested. Phase 3 (Automation: browser, desktop, deploy,
-communications) and Phase 4 (Intelligence: model-backed planning, semantic
-memory, distributed workers, marketplace) build on the contracts already in
-place.
+Phase 1 (Foundation) and Phase 2 (Execution) are complete. Phase 3
+(Automation) is well underway — the code engine (git-versioned deliveries),
+real build pipelines and test execution, browser automation, an
+approval-gated deployment engine, and a communication + notification engine
+are all in and tested. Phase 4 has begun with model-backed planning
+(`megaai run "…" --model-planner`). See the [roadmap](./ROADMAP.md) for
+what's next (desktop/vision automation, semantic memory, distributed workers,
+the plugin marketplace) — all building on the contracts already in place.
+
+**28 packages · 97 tests · fully offline demo.**
 
 ## License
 

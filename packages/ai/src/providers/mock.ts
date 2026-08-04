@@ -264,6 +264,50 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
   } as unknown as JsonObject;
 }
 
+/**
+ * Deterministic stand-in for a model-generated plan. Shapes a valid PlanSpec
+ * JSON so the meta brain's model-planning path is exercisable offline.
+ */
+function planReplyFor(goal: string): JsonObject {
+  const spec = {
+    projectName: goal.replace(/\s+/g, ' ').trim().slice(0, 60) || 'Model project',
+    domain: 'model-generated',
+    summary: `Model-generated plan for: ${goal.slice(0, 120)}`,
+    phases: [
+      {
+        name: 'Discovery',
+        tasks: [
+          { title: 'Requirements research', description: `Clarify requirements for: ${goal}`, agentKind: 'research', complexity: 'standard' },
+        ],
+      },
+      {
+        name: 'Build',
+        tasks: [
+          { title: 'Project scaffold setup', description: 'Initialise the project skeleton', agentKind: 'coding', complexity: 'standard' },
+          { title: 'Implement core functionality', description: goal, agentKind: 'coding', complexity: 'complex' },
+        ],
+      },
+      {
+        name: 'Quality',
+        tasks: [
+          { title: 'Build verification', description: 'Verify the project builds and parses', agentKind: 'build', complexity: 'standard' },
+          { title: 'Automated test suite', description: 'Test the core functionality', agentKind: 'testing', complexity: 'standard' },
+        ],
+      },
+      {
+        name: 'Delivery',
+        tasks: [
+          { title: 'Project documentation', description: 'Document the deliverable', agentKind: 'documentation', complexity: 'trivial' },
+          { title: 'Deployment preparation', description: 'Plan and run the deployment', agentKind: 'devops', complexity: 'standard' },
+        ],
+      },
+    ],
+    risks: ['Scope may grow as requirements are clarified'],
+    questionsForHuman: [],
+  };
+  return spec as unknown as JsonObject;
+}
+
 export class MockProvider implements Provider {
   readonly kind: ProviderKind;
   readonly name: string;
@@ -301,17 +345,19 @@ export class MockProvider implements Provider {
 
     const meta = request.metadata ?? {};
     const text =
-      meta.agentKind !== undefined
-        ? JSON.stringify(replyForTask(meta, request), null, 2)
-        : JSON.stringify(
-            {
-              thoughts: 'No task metadata supplied; replying generically.',
-              summary: `Acknowledged: ${request.messages.at(-1)?.content.slice(0, 120) ?? ''}`,
-              actions: [],
-            },
-            null,
-            2,
-          );
+      meta.planning === true
+        ? JSON.stringify(planReplyFor(String(meta.goal ?? request.messages.at(-1)?.content ?? 'a project')), null, 2)
+        : meta.agentKind !== undefined
+          ? JSON.stringify(replyForTask(meta, request), null, 2)
+          : JSON.stringify(
+              {
+                thoughts: 'No task metadata supplied; replying generically.',
+                summary: `Acknowledged: ${request.messages.at(-1)?.content.slice(0, 120) ?? ''}`,
+                actions: [],
+              },
+              null,
+              2,
+            );
 
     const inputTokens = estimateTokens(`${request.system ?? ''}${request.messages.map((m) => m.content).join('')}`);
     return {

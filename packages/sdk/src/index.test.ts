@@ -122,6 +122,34 @@ test('provider fallback: primary rate-limits mid-project, backup finishes it', a
   }
 });
 
+test('model-backed planning: the mock plans the project, and it runs to completion', async () => {
+  const { root, cleanup } = tempDirs();
+  try {
+    const megaai = createMegaAI({
+      persistent: false,
+      quiet: true,
+      configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
+      configOverrides: { policy: { autoApprove: true }, meta: { planner: 'model' } },
+    });
+    await megaai.start();
+
+    const decisions: Array<Record<string, unknown>> = [];
+    megaai.bus.on(Events.DecisionMade, (event) => decisions.push(event.payload as Record<string, unknown>));
+
+    const result = await megaai.submitGoal('Build a small internal tool');
+    assert.equal(result.project.status, 'completed');
+    // The plan came from the model path (mock), not the templates.
+    const planDecision = decisions.find((d) => d.kind === 'plan');
+    assert.equal(planDecision?.source, 'model');
+    assert.equal(planDecision?.domain, 'model-generated');
+    assert.ok(result.tasks.length >= 5);
+
+    await megaai.stop();
+  } finally {
+    cleanup();
+  }
+});
+
 test('without auto-approve the run waits for a human decision', async () => {
   const { root, cleanup } = tempDirs();
   try {

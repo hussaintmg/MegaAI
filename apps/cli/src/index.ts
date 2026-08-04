@@ -62,7 +62,10 @@ function watchProgress(megaai: MegaAI): void {
   });
 }
 
-async function executeGoal(goal: string, options: { persistent: boolean; quiet: boolean }): Promise<number> {
+async function executeGoal(
+  goal: string,
+  options: { persistent: boolean; quiet: boolean; modelPlanner?: boolean },
+): Promise<number> {
   const megaai = createMegaAI({
     persistent: options.persistent,
     quiet: true, // CLI renders its own progress; full logs stay in the buffer
@@ -71,6 +74,9 @@ async function executeGoal(goal: string, options: { persistent: boolean; quiet: 
       // Let the testing agent really execute suites (node --test) and let
       // coding agents commit; both stay allowlisted and sandboxed.
       security: { allowShell: true },
+      // Ask the AI to plan when requested (uses the mock offline, real
+      // providers when a key is set); templates otherwise.
+      meta: { planner: options.modelPlanner ? 'model' : 'template' },
     },
   });
   await megaai.start();
@@ -149,6 +155,7 @@ function help(): number {
   process.stdout.write(`Usage:\n`);
   process.stdout.write(`  megaai demo [--quiet]        offline end-to-end demo (mock provider)\n`);
   process.stdout.write(`  megaai run "<goal>"          plan + execute a goal\n`);
+  process.stdout.write(`  megaai run "<goal>" --model-planner   let the AI generate the plan\n`);
   process.stdout.write(`  megaai plan "<goal>"         show the generated plan only\n`);
   process.stdout.write(`  megaai status                projects, learning and provider status\n`);
   process.stdout.write(`  megaai serve                 how to start the dashboard server\n\n`);
@@ -161,13 +168,14 @@ function help(): number {
 async function main(): Promise<number> {
   const [, , command, ...rest] = process.argv;
   const quiet = rest.includes('--quiet');
+  const modelPlanner = rest.includes('--model-planner');
   const positional = rest.filter((arg) => !arg.startsWith('--'));
 
   switch (command) {
     case 'demo':
       return executeGoal(
         'Build a complete ecommerce store for a client: product catalog, cart, checkout and authentication',
-        { persistent: false, quiet },
+        { persistent: false, quiet, modelPlanner },
       );
     case 'run': {
       const goal = positional.join(' ').trim();
@@ -175,7 +183,7 @@ async function main(): Promise<number> {
         process.stderr.write(`${red('error:')} megaai run needs a goal, e.g. megaai run "Build a blog"\n`);
         return 2;
       }
-      return executeGoal(goal, { persistent: true, quiet });
+      return executeGoal(goal, { persistent: true, quiet, modelPlanner });
     }
     case 'plan': {
       const goal = positional.join(' ').trim();

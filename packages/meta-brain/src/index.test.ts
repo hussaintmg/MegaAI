@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { CompletionRequest, CompletionResponse } from '@megaai/types';
 import { MemoryDatabase } from '@megaai/database';
-import { analyzeGoal, generatePlan, MetaBrain } from './index.js';
+import { analyzeGoal, generatePlan, MetaBrain, parsePlanSpec } from './index.js';
+
+function fakeResponse(text: string): CompletionResponse {
+  return { text, provider: 'mock', model: 'm', stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } };
+}
 
 test('goal analysis detects domains and features', () => {
   assert.equal(analyzeGoal('Build the client a complete ecommerce store with checkout').domain, 'ecommerce');
@@ -39,6 +44,92 @@ test('escalates complexity after failed attempts', async () => {
   assert.equal(await meta.complexityFor({ ...base, complexity: 'standard', attempts: 1 }), 'standard');
   assert.equal(await meta.complexityFor({ ...base, complexity: 'standard', attempts: 2 }), 'complex');
   assert.equal(await meta.complexityFor({ ...base, complexity: 'complex', attempts: 2 }), 'frontier');
+});
+
+test('parsePlanSpec sanitises model output and rejects junk', () => {
+  const good = parsePlanSpec(
+    '```json\n' +
+      JSON.stringify({
+        projectName: 'Shop',
+        domain: 'ecommerce',
+        summary: 's',
+        phases: [
+          { name: 'A', tasks: [{ title: 'T1', description: 'd', agentKind: 'coding', complexity: 'complex' }] },
+          { name: 'B', tasks: [{ title: 'T2', agentKind: 'not-a-real-kind', complexity: 'weird', dependsOnTitles: ['T1', 42] }] },
+        ],
+      }) +
+      '\n```',
+    'build a shop',
+  );
+  assert.ok(good);
+  assert.equal(good!.phases.length, 2);
+  // Unknown agentKind coerces to coding; bad complexity to standard; non-string dep dropped.
+  const t2 = good!.phases[1]!.tasks[0]!;
+  assert.equal(t2.agentKind, 'coding');
+  assert.equal(t2.complexity, 'standard');
+  assert.deepEqual(t2.dependsOnTitles, ['T1']);
+
+  assert.equal(parsePlanSpec('not json', 'g'), undefined);
+  assert.equal(parsePlanSpec('{"phases":[]}', 'g'), undefined);
+  assert.equal(parsePlanSpec('{"phases":[{"name":"x","tasks":[{}]}]}', 'g'), undefined);
+});
+
+test('makePlan uses the model when configured and materialises a real plan', async () => {
+  const requests: CompletionRequest[] = [];
+  const meta = new MetaBrain({
+    database: new MemoryDatabase(),
+    planner: 'model',
+    complete: async (request) => {
+      requests.push(request);
+      return fakeResponse(
+        JSON.stringify({
+          projectName: 'From model',
+          domain: 'model-generated',
+          summary: 'planned by the model',
+          phases: [{ name: 'Build', tasks: [{ title: 'Do it', agentKind: 'coding', complexity: 'complex' }] }],
+        }),
+      );
+    },
+  });
+  const plan = await meta.makePlan('build something');
+  assert.equal(plan.domain, 'model-generated');
+  assert.equal(plan.phases[0]?.tasks[0]?.title, 'Do it');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.metadata?.planning, true);
+});
+
+test('makePlan falls back to templates when the model output is unusable or errors', async () => {
+  const garbage = new MetaBrain({
+    database: new MemoryDatabase(),
+    planner: 'model',
+    complete: async () => fakeResponse('the model said no json here'),
+  });
+  const fallback = await garbage.makePlan('build an ecommerce store');
+  assert.equal(fallback.domain, 'ecommerce'); // template plan, not model
+
+  const broken = new MetaBrain({
+    database: new MemoryDatabase(),
+    planner: 'model',
+    complete: async () => {
+      throw new Error('provider down');
+    },
+  });
+  const recovered = await broken.makePlan('build an api');
+  assert.equal(recovered.domain, 'api'); // template plan despite the model failing
+});
+
+test('makePlan uses templates by default (no model call)', async () => {
+  let called = false;
+  const meta = new MetaBrain({
+    database: new MemoryDatabase(),
+    complete: async () => {
+      called = true;
+      return fakeResponse('{}');
+    },
+  });
+  const plan = await meta.makePlan('build an ecommerce store');
+  assert.equal(plan.domain, 'ecommerce');
+  assert.equal(called, false);
 });
 
 test('learning stats aggregate per agent and provider', async () => {

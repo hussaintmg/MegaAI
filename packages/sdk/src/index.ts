@@ -231,7 +231,15 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
 
   for (const tool of options.extraTools ?? []) tools.register(tool);
   const contextEngine = new ContextEngine({ memory, planning });
-  const meta = new MetaBrain({ database, bus, clock, resources });
+  const meta = new MetaBrain({
+    database,
+    bus,
+    clock,
+    resources,
+    planner: config.meta.planner === 'model' ? 'model' : 'template',
+    // Plans are high-value: run them at complex tier through the fallback chain.
+    complete: (request) => sessions.completeWithFallback(request, { complexity: 'complex' }),
+  });
 
   const orchestrator = new Orchestrator({
     config,

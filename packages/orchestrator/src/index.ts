@@ -200,7 +200,7 @@ export class Orchestrator {
     this.o.metrics.inc('goals.received');
     this.log.info('goal received', { goal });
 
-    const plan = this.o.meta.plan(goal);
+    const plan = await this.o.meta.makePlan(goal);
     const { project, tasks } = await this.o.planning.materializePlan(plan, goal);
     const workspaceDir = await this.workspaceFor(project.id, project.name);
     await this.o.audit.record({

@@ -10,12 +10,42 @@
  * planning slots in (Phase 4) without touching any caller.
  */
 
-import type { JsonObject, PlanSpec, PlanTask, TaskComplexity, TaskRecord } from '@megaai/types';
+import type {
+  CompletionRequest,
+  CompletionResponse,
+  JsonObject,
+  PlanPhase,
+  PlanSpec,
+  PlanTask,
+  TaskComplexity,
+  TaskRecord,
+} from '@megaai/types';
 import { Events, MegaError } from '@megaai/types';
-import { type Clock, newId, systemClock, truncate } from '@megaai/utils';
+import { type Clock, extractJsonObject, isPlainObject, newId, systemClock, truncate } from '@megaai/utils';
 import type { Database, Collection } from '@megaai/database';
 import type { EventBus } from '@megaai/events';
 import type { ResourceMonitor } from '@megaai/resources';
+
+/** Runs one completion — injected so the meta brain stays decoupled from @megaai/ai. */
+export type PlanCompleter = (request: CompletionRequest) => Promise<CompletionResponse>;
+
+/** Agent kinds the built-in fleet can execute (unknowns coerce to coding). */
+export const KNOWN_AGENT_KINDS = [
+  'coding',
+  'testing',
+  'review',
+  'research',
+  'documentation',
+  'marketing',
+  'crm',
+  'devops',
+  'architecture',
+  'build',
+  'browser',
+  'support',
+] as const;
+
+const COMPLEXITIES: TaskComplexity[] = ['trivial', 'standard', 'complex', 'frontier'];
 
 /* ------------------------------------------------------------------ *
  * Goal analysis
@@ -253,6 +283,84 @@ export function generatePlan(goal: string): PlanSpec {
 }
 
 /* ------------------------------------------------------------------ *
+ * Model-backed planning
+ * ------------------------------------------------------------------ */
+
+export const PLAN_SYSTEM_PROMPT = `You are the planning brain of MegaAI, an autonomous software delivery system.
+Given a goal, produce a concrete, phased delivery plan and respond with ONLY a JSON object of this shape:
+{
+  "projectName": "short name",
+  "domain": "e.g. ecommerce | erp | api | website | generic",
+  "summary": "one sentence",
+  "phases": [
+    { "name": "Phase name", "tasks": [
+      { "title": "Task title", "description": "what to do",
+        "agentKind": "one of: ${KNOWN_AGENT_KINDS.join(', ')}",
+        "complexity": "trivial | standard | complex | frontier",
+        "dependsOnTitles": ["earlier task titles this depends on (optional)"] }
+    ] }
+  ],
+  "risks": ["..."],
+  "questionsForHuman": ["..."]
+}
+Phases run in order. Always include research, implementation (coding), a build check, tests, documentation and a deployment task. No prose outside the JSON.`;
+
+function coerceAgentKind(value: unknown): string {
+  return typeof value === 'string' && (KNOWN_AGENT_KINDS as readonly string[]).includes(value) ? value : 'coding';
+}
+
+function coerceComplexity(value: unknown): TaskComplexity {
+  return typeof value === 'string' && COMPLEXITIES.includes(value as TaskComplexity)
+    ? (value as TaskComplexity)
+    : 'standard';
+}
+
+/** Parse and sanitise a model-produced plan into a valid PlanSpec, or undefined. */
+export function parsePlanSpec(text: string, goal: string): PlanSpec | undefined {
+  const parsed = extractJsonObject(text);
+  if (!isPlainObject(parsed)) return undefined;
+  const raw = parsed as JsonObject;
+  if (!Array.isArray(raw.phases)) return undefined;
+
+  const phases: PlanPhase[] = [];
+  for (const rawPhase of raw.phases) {
+    if (!isPlainObject(rawPhase) || !Array.isArray(rawPhase.tasks)) continue;
+    const tasks: PlanTask[] = [];
+    for (const rawTask of rawPhase.tasks) {
+      if (!isPlainObject(rawTask) || typeof rawTask.title !== 'string' || rawTask.title.trim().length === 0) continue;
+      const dependsOnTitles = Array.isArray(rawTask.dependsOnTitles)
+        ? rawTask.dependsOnTitles.filter((title): title is string => typeof title === 'string')
+        : undefined;
+      tasks.push({
+        title: rawTask.title.trim(),
+        description: typeof rawTask.description === 'string' ? rawTask.description : '',
+        agentKind: coerceAgentKind(rawTask.agentKind),
+        complexity: coerceComplexity(rawTask.complexity),
+        ...(dependsOnTitles && dependsOnTitles.length > 0 ? { dependsOnTitles } : {}),
+      });
+    }
+    if (tasks.length > 0) {
+      phases.push({ name: typeof rawPhase.name === 'string' ? rawPhase.name : `Phase ${phases.length + 1}`, tasks });
+    }
+  }
+  if (phases.length === 0) return undefined;
+
+  return {
+    projectName: typeof raw.projectName === 'string' && raw.projectName.trim() ? raw.projectName.trim() : truncate(goal, 60),
+    domain: typeof raw.domain === 'string' ? raw.domain : 'model',
+    summary:
+      typeof raw.summary === 'string'
+        ? raw.summary
+        : `Model-generated plan: ${phases.length} phases, ${phases.reduce((n, p) => n + p.tasks.length, 0)} tasks.`,
+    phases,
+    risks: Array.isArray(raw.risks) ? raw.risks.filter((r): r is string => typeof r === 'string') : [],
+    questionsForHuman: Array.isArray(raw.questionsForHuman)
+      ? raw.questionsForHuman.filter((q): q is string => typeof q === 'string')
+      : [],
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * Learning
  * ------------------------------------------------------------------ */
 
@@ -284,6 +392,10 @@ export interface MetaBrainOptions {
   bus?: EventBus;
   clock?: Clock;
   resources?: ResourceMonitor;
+  /** 'template' (deterministic, default) or 'model' (ask the AI to plan). */
+  planner?: 'template' | 'model';
+  /** Completion runner used when planner === 'model'. */
+  complete?: PlanCompleter;
 }
 
 export class MetaBrain {
@@ -292,26 +404,70 @@ export class MetaBrain {
   private readonly bus?: EventBus;
   private readonly clock: Clock;
   private readonly resources?: ResourceMonitor;
+  private readonly planner: 'template' | 'model';
+  private readonly complete?: PlanCompleter;
 
   constructor(options: MetaBrainOptions) {
     this.outcomes = options.database.collection<OutcomeRecord>('outcomes');
     this.bus = options.bus;
     this.clock = options.clock ?? systemClock;
     this.resources = options.resources;
+    this.planner = options.planner ?? 'template';
+    this.complete = options.complete;
   }
 
-  /** Think + Plan: understand the goal and produce a phased plan. */
-  plan(goal: string): PlanSpec {
+  private requireGoal(goal: string): string {
     if (!goal || goal.trim().length < 3) {
       throw new MegaError('INVALID_INPUT', 'Goal must be a non-empty description of what to build');
     }
-    const spec = generatePlan(goal.trim());
+    return goal.trim();
+  }
+
+  /** Think + Plan (template): deterministic, synchronous, offline. */
+  plan(goal: string): PlanSpec {
+    const spec = generatePlan(this.requireGoal(goal));
     this.bus?.emit(
       Events.DecisionMade,
-      { kind: 'plan', domain: spec.domain, phases: spec.phases.length, summary: spec.summary },
+      { kind: 'plan', source: 'template', domain: spec.domain, phases: spec.phases.length, summary: spec.summary },
       'meta-brain',
     );
     return spec;
+  }
+
+  /**
+   * Produce a plan using the configured planner: ask the model when
+   * `planner: 'model'` (with a completer), otherwise use templates. Any
+   * model failure — unavailable, unparseable, empty — falls back to the
+   * template plan so a goal is never left unplanned.
+   */
+  async makePlan(goal: string): Promise<PlanSpec> {
+    const clean = this.requireGoal(goal);
+    if (this.planner === 'model' && this.complete) {
+      try {
+        const response = await this.complete({
+          system: PLAN_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: `Goal: ${clean}\n\nProduce the delivery plan as JSON.` }],
+          metadata: { planning: true, goal: clean },
+        });
+        const spec = parsePlanSpec(response.text, clean);
+        if (spec) {
+          this.bus?.emit(
+            Events.DecisionMade,
+            { kind: 'plan', source: 'model', domain: spec.domain, phases: spec.phases.length, summary: spec.summary },
+            'meta-brain',
+          );
+          return spec;
+        }
+        this.bus?.emit(Events.DecisionMade, { kind: 'plan', source: 'model-fallback', reason: 'unparseable' }, 'meta-brain');
+      } catch (err) {
+        this.bus?.emit(
+          Events.DecisionMade,
+          { kind: 'plan', source: 'model-fallback', reason: MegaError.from(err).message },
+          'meta-brain',
+        );
+      }
+    }
+    return this.plan(clean);
   }
 
   /** Which model tier a task deserves (informed by past failures). */

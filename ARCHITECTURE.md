@@ -104,7 +104,7 @@ system like this:
 | `deploy` | Deployment engine: pure `deploy.plan` + approval-gated `deploy.execute`; simulated by default, Docker/Vercel/Railway adapters | `DeployEngine`, `createDeployTools` |
 | `comm` | Communication engine: channels (captured/webhook), `comm.send` tool (gated), event-driven `NotificationEngine` for operator updates | `CommEngine`, `NotificationEngine`, `createCommTool` |
 | `agents` | Supervised agent lifecycle + 9 built-in agent kinds | `AgentRuntime`, `ModelDrivenAgent` |
-| `meta-brain` | Goal analysis, plan templates, decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan` |
+| `meta-brain` | Goal analysis, plan generation (templates or model-backed via `makePlan`), decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan`, `parsePlanSpec` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |
 | `sdk` | `createMegaAI()` composition root + re-exports | `createMegaAI` |
 
@@ -133,8 +133,9 @@ system like this:
 
 ## Known Phase-2 limitations (by design, tracked in ROADMAP.md)
 
-- Plan generation is template-based; model-backed planning arrives with the
-  Phase 4 meta brain upgrade (same `plan()` seam).
+- Plan generation is template-based by default; model-backed planning is
+  available via `config.meta.planner: 'model'` (`makePlan()`), with a critic/
+  refine loop still to come.
 - Goal workflows use closure steps, so a crashed *goal* run resumes at task
   granularity (tasks are individually durable) rather than mid-step.
   Registered named workflows already resume across processes.

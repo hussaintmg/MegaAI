@@ -85,7 +85,11 @@ model these plug into already exists.
 
 Self-improving, distributed, extensible.
 
-- [ ] Model-backed planning (the `MetaBrain.plan()` seam swaps templates for a frontier model + critic loop)
+- [x] Model-backed planning v1: `MetaBrain.makePlan()` asks the AI (through the
+      fallback chain) to generate a validated `PlanSpec`, sanitising and
+      falling back to templates on any failure; `config.meta.planner: 'model'`
+      or `megaai run … --model-planner`. Deterministic offline via the mock.
+- [ ] Planning critic loop (generate → critique → refine)
 - [ ] Real embeddings + semantic retrieval (swap `embed()`; add re-ranking)
 - [ ] Learning-driven routing (choose provider/model/agent from outcome stats automatically)
 - [ ] Multi-step agent loops (iterative act → observe → refine within one task)
