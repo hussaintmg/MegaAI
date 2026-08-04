@@ -126,9 +126,24 @@ export interface ModelCard {
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 
+export interface ChatTextPart {
+  type: 'text';
+  text: string;
+}
+
+/** An inline image, base64-encoded (no `data:` URI prefix). */
+export interface ChatImagePart {
+  type: 'image';
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  data: string;
+}
+
+export type ChatContentPart = ChatTextPart | ChatImagePart;
+
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  /** Plain text, or a multimodal part list (text + images) for vision-capable models. */
+  content: string | ChatContentPart[];
 }
 
 export interface CompletionRequest {

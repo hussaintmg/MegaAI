@@ -59,6 +59,9 @@
       "path": "packages/code"
     },
     {
+      "path": "packages/vision"
+    },
+    {
       "path": "packages/context"
     },
     {

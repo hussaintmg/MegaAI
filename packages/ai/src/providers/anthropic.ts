@@ -9,10 +9,20 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
+import type { ChatMessage, CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
+
+/** Anthropic's Messages API content-block shape for one chat turn. */
+function toAnthropicContent(content: ChatMessage['content']): string | Array<Record<string, unknown>> {
+  if (typeof content === 'string') return content;
+  return content.map((part) =>
+    part.type === 'text'
+      ? { type: 'text', text: part.text }
+      : { type: 'image', source: { type: 'base64', media_type: part.mimeType, data: part.data } },
+  );
+}
 
 export interface AnthropicProviderOptions {
   apiKey?: string;
@@ -60,10 +70,13 @@ export class AnthropicProvider implements Provider {
     // the Messages API takes only user/assistant turns in `messages`.
     const systemParts: string[] = [];
     if (request.system) systemParts.push(request.system);
-    const turns: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    const turns: Array<{ role: 'user' | 'assistant'; content: string | Array<Record<string, unknown>> }> = [];
     for (const message of request.messages) {
-      if (message.role === 'system') systemParts.push(message.content);
-      else turns.push({ role: message.role, content: message.content });
+      if (message.role === 'system') {
+        systemParts.push(typeof message.content === 'string' ? message.content : JSON.stringify(message.content));
+      } else {
+        turns.push({ role: message.role, content: toAnthropicContent(message.content) });
+      }
     }
     if (turns.length === 0) turns.push({ role: 'user', content: '(empty)' });
 
@@ -72,7 +85,7 @@ export class AnthropicProvider implements Provider {
         model,
         max_tokens: request.maxTokens ?? this.options.maxTokens ?? 16_000,
         system: systemParts.length > 0 ? systemParts.join('\n\n') : undefined,
-        messages: turns,
+        messages: turns as unknown as Anthropic.MessageParam[],
       });
 
       if (response.stop_reason === 'refusal') {

@@ -160,7 +160,7 @@ every action lands in the audit log.
 | Foundation | `types` · `utils` · `contracts` · `config` · `logger` · `events` · `database` · `security` |
 | Core runtime | `runtime` (DI, lifecycle, health, metrics, scheduler) · `resources` |
 | AI layer | `ai` (providers, models, limits, sessions, fallback) |
-| Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` |
+| Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` · `code` · `vision` |
 | Intelligence | `agents` · `meta-brain` · `orchestrator` |
 | Surface | `sdk` · `apps/cli` · `apps/server` |
 
@@ -196,8 +196,8 @@ distributed workers, and the plugin marketplace.
 ## Development
 
 ```bash
-npm run build     # tsc -b across all 25 workspaces
-npm test          # build + 73 tests (node:test, all offline)
+npm run build     # tsc -b across all 27 workspaces
+npm test          # build + 88 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
 ```

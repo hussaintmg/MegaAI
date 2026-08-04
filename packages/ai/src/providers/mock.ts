@@ -18,7 +18,7 @@ import type {
   ProviderKind,
 } from '@megaai/types';
 import { MegaError } from '@megaai/types';
-import { estimateTokens, slugify } from '@megaai/utils';
+import { chatText, estimateTokens, hasImages, slugify } from '@megaai/utils';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
 
@@ -189,6 +189,24 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       summary = `Updated CRM records for "${title}".`;
       break;
     }
+    case 'vision': {
+      const imageCount = request.messages.filter((m) => hasImages(m.content)).flatMap((m) =>
+        typeof m.content === 'string' ? [] : m.content.filter((p) => p.type === 'image'),
+      ).length;
+      actions.push({
+        tool: 'fs.write',
+        input: {
+          path: `docs/vision-${slug}.md`,
+          content: `# Vision analysis — ${title}\n\nImages reviewed: ${imageCount}\n\n${description || 'No further notes.'}\n`,
+        },
+        reason: title,
+      });
+      summary =
+        imageCount > 0
+          ? `Analysed ${imageCount} image(s) for "${title}" and recorded findings.`
+          : `No images attached for "${title}"; nothing to analyse.`;
+      break;
+    }
     case 'research':
     case 'review':
     case 'architecture':
@@ -254,14 +272,16 @@ export class MockProvider implements Provider {
         : JSON.stringify(
             {
               thoughts: 'No task metadata supplied; replying generically.',
-              summary: `Acknowledged: ${request.messages.at(-1)?.content.slice(0, 120) ?? ''}`,
+              summary: `Acknowledged: ${chatText(request.messages.at(-1)?.content ?? '').slice(0, 120)}`,
               actions: [],
             },
             null,
             2,
           );
 
-    const inputTokens = estimateTokens(`${request.system ?? ''}${request.messages.map((m) => m.content).join('')}`);
+    const inputTokens = estimateTokens(
+      `${request.system ?? ''}${request.messages.map((m) => chatText(m.content)).join('')}`,
+    );
     return {
       text,
       provider: this.kind,

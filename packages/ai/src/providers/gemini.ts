@@ -3,10 +3,19 @@
  * (`models/<id>:generateContent`).
  */
 
-import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
+import type { ChatMessage, CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
+import { chatText } from '@megaai/utils';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
+
+/** Gemini `parts` shape: text and/or inlineData (base64 image). */
+function toGeminiParts(content: ChatMessage['content']): Array<Record<string, unknown>> {
+  if (typeof content === 'string') return [{ text: content }];
+  return content.map((part) =>
+    part.type === 'text' ? { text: part.text } : { inlineData: { mimeType: part.mimeType, data: part.data } },
+  );
+}
 
 export interface GeminiProviderOptions {
   apiKey?: string;
@@ -52,9 +61,12 @@ export class GeminiProvider implements Provider {
       .filter((message) => message.role !== 'system')
       .map((message) => ({
         role: message.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: message.content }],
+        parts: toGeminiParts(message.content),
       }));
-    const systemText = [request.system, ...request.messages.filter((m) => m.role === 'system').map((m) => m.content)]
+    const systemText = [
+      request.system,
+      ...request.messages.filter((m) => m.role === 'system').map((m) => chatText(m.content)),
+    ]
       .filter(Boolean)
       .join('\n\n');
 

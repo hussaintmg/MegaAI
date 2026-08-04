@@ -56,7 +56,11 @@ model these plug into already exists.
 - [ ] Real build pipelines (npm install/build on top of the gated shell tool)
 - [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
-- [ ] Vision (screenshots, UI understanding, image analysis)
+- [x] Vision v1 (`@megaai/vision`): multimodal chat content (`ChatImagePart`) carried
+      through every provider (Anthropic/OpenAI-compat/Gemini/mock); `vision.readImage`
+      lets agents pull a workspace screenshot in for analysis; testing/review agents
+      granted it. Understanding is delegated to a vision-capable model — screen capture
+      and OCR-based desktop vision stay future work.
 - [ ] Deployment integrations (Docker, VPS, Railway, Vercel, Cloudflare) behind the approval-gated `deploy` permission
 - [ ] Communication channels (email, WhatsApp, Slack, Discord, Telegram) behind `comm.send`
 - [ ] CRM integrations (clients, invoices, leads, meetings, payments)

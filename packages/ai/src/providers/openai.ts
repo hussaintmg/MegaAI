@@ -4,10 +4,20 @@
  * Codex/OpenCode-style backends that speak the same wire protocol.
  */
 
-import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
+import type { ChatMessage, CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
+
+/** OpenAI chat-completions content shape: string, or text/image_url parts. */
+function toOpenAiContent(content: ChatMessage['content']): string | Array<Record<string, unknown>> {
+  if (typeof content === 'string') return content;
+  return content.map((part) =>
+    part.type === 'text'
+      ? { type: 'text', text: part.text }
+      : { type: 'image_url', image_url: { url: `data:${part.mimeType};base64,${part.data}` } },
+  );
+}
 
 export interface OpenAICompatOptions {
   apiKey?: string;
@@ -51,7 +61,7 @@ export class OpenAICompatProvider implements Provider {
     const url = `${this.options.baseURL ?? 'https://api.openai.com'}/v1/chat/completions`;
     const messages = [
       ...(request.system ? [{ role: 'system', content: request.system }] : []),
-      ...request.messages,
+      ...request.messages.map((message) => ({ role: message.role, content: toOpenAiContent(message.content) })),
     ];
 
     let response: Response;

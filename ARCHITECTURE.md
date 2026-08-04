@@ -100,6 +100,7 @@ system like this:
 | `prompt` | Prompt compilation + the action protocol contract | `buildSystemPrompt`, `ACTION_PROTOCOL` |
 | `context` | Budgeted context assembly from planning + memory | `ContextEngine` |
 | `code` | Code engine: git for delivery workspaces (auto-versioned deliveries, `git.*` agent tools) | `GitEngine`, `createGitTools` |
+| `vision` | Vision engine: sandboxed image reads turned into multimodal chat content (`vision.readImage` agent tool); providers pass `ChatImagePart`s straight through | `readImagePart`, `createVisionTools` |
 | `agents` | Supervised agent lifecycle + 9 built-in agent kinds | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan templates, decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |

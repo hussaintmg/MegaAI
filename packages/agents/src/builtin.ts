@@ -76,8 +76,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'Testing Agent',
     description: 'Writes and runs tests, verifies behaviour',
     systemPrompt:
-      'You are a meticulous QA engineer. Write focused automated tests for the task at hand, run them when a shell is available (use expectSuccess so failures are loud), and report exactly what passed and failed.',
-    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.status'],
+      'You are a meticulous QA engineer. Write focused automated tests for the task at hand, run them when a shell is available (use expectSuccess so failures are loud), and report exactly what passed and failed. When the task includes a screenshot, use vision.readImage to inspect it for visual/UI defects.',
+    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.status', 'vision.readImage'],
     defaultComplexity: 'standard',
   },
   {
@@ -85,8 +85,8 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'Review Agent',
     description: 'Reviews code and plans for defects and risks',
     systemPrompt:
-      'You are a code reviewer. Read the relevant files and report every defect or risk you find, including low-confidence ones, each with severity. Do not modify files.',
-    allowedTools: ['fs.read', 'fs.list', 'git.log', 'git.diff', 'git.status'],
+      'You are a code reviewer. Read the relevant files and report every defect or risk you find, including low-confidence ones, each with severity. When the task includes a screenshot, use vision.readImage to check the rendered UI against the requirements. Do not modify files.',
+    allowedTools: ['fs.read', 'fs.list', 'git.log', 'git.diff', 'git.status', 'vision.readImage'],
     defaultComplexity: 'standard',
   },
   {

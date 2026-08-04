@@ -36,6 +36,7 @@ import { PlanningService } from '@megaai/planning';
 import { WorkflowEngine } from '@megaai/workflow';
 import { createToolRegistry, ToolRegistry } from '@megaai/tools';
 import { createGitTools, GitEngine } from '@megaai/code';
+import { createVisionTools } from '@megaai/vision';
 import { ContextEngine } from '@megaai/context';
 import { MetaBrain } from '@megaai/meta-brain';
 import { Orchestrator, type GoalResult } from '@megaai/orchestrator';
@@ -189,6 +190,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     httpAllowedHosts: config.security.httpAllowedHosts,
   });
   for (const tool of createGitTools(new GitEngine())) tools.register(tool);
+  for (const tool of createVisionTools()) tools.register(tool);
   for (const tool of options.extraTools ?? []) tools.register(tool);
   const contextEngine = new ContextEngine({ memory, planning });
   const meta = new MetaBrain({ database, bus, clock, resources });
@@ -299,3 +301,4 @@ export { generatePlan, analyzeGoal } from '@megaai/meta-brain';
 export type { GoalResult } from '@megaai/orchestrator';
 export { MemorySink } from '@megaai/logger';
 export { GitEngine, createGitTools } from '@megaai/code';
+export { createVisionTools, readImagePart, visionReadImageTool } from '@megaai/vision';

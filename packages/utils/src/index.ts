@@ -3,7 +3,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { MegaError, type JsonValue, type Timestamp } from '@megaai/types';
+import { MegaError, type ChatContentPart, type JsonValue, type Timestamp } from '@megaai/types';
 
 /* ------------------------------------------------------------------ *
  * Ids
@@ -266,4 +266,26 @@ export function estimateTokens(text: string): number {
 export function assertDefined<T>(value: T | undefined | null, message: string): T {
   if (value === undefined || value === null) throw new MegaError('INTERNAL', message);
   return value;
+}
+
+/* ------------------------------------------------------------------ *
+ * Multimodal chat content
+ * ------------------------------------------------------------------ */
+
+/** Plain-text view of chat content: text parts joined, images as a placeholder. */
+export function chatText(content: string | ChatContentPart[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .map((part) => (part.type === 'text' ? part.text : `[image: ${part.mimeType}]`))
+    .join('\n');
+}
+
+/** True when content carries at least one inline image part. */
+export function hasImages(content: string | ChatContentPart[]): boolean {
+  return typeof content !== 'string' && content.some((part) => part.type === 'image');
+}
+
+export function imageParts(content: string | ChatContentPart[]): ChatContentPart[] {
+  if (typeof content === 'string') return [];
+  return content.filter((part) => part.type === 'image');
 }
