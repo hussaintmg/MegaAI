@@ -14,6 +14,7 @@ import type {
   PlanSpec,
   Priority,
   ProjectRecord,
+  TaskAttachment,
   TaskRecord,
 } from '@megaai/types';
 import { Events, MegaError } from '@megaai/types';
@@ -33,6 +34,8 @@ export interface CreateTaskInput {
   complexity?: TaskRecord['complexity'];
   dependsOn?: Id[];
   maxAttempts?: number;
+  /** Images the assigned agent should look at, e.g. for `vision` tasks. */
+  attachments?: TaskAttachment[];
 }
 
 export class PlanningService {
@@ -113,6 +116,7 @@ export class PlanningService {
       dependsOn: input.dependsOn ?? [],
       attempts: 0,
       maxAttempts: input.maxAttempts ?? 2,
+      attachments: input.attachments,
       createdAt: now,
       updatedAt: now,
     };

@@ -18,7 +18,7 @@ import type {
   ProviderKind,
 } from '@megaai/types';
 import { MegaError } from '@megaai/types';
-import { estimateTokens, slugify } from '@megaai/utils';
+import { contentImageCount, contentText, estimateTokens, slugify } from '@megaai/utils';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
 
@@ -189,6 +189,46 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       summary = `Updated CRM records for "${title}".`;
       break;
     }
+    case 'vision': {
+      const imageCount = request.messages.reduce((sum, m) => sum + contentImageCount(m.content), 0);
+      const content =
+        imageCount > 0
+          ? `# Vision analysis — ${title}\n\nImages inspected: ${imageCount}.\n\n${description || 'No further instructions given.'}\n\nFindings:\n- Image(s) received and decoded successfully.\n- No blocking visual defects detected by the offline analyzer.\n`
+          : `# Vision analysis — ${title}\n\nNo images were attached to this task, so no visual analysis could be performed.\n`;
+      actions.push({
+        tool: 'fs.write',
+        input: { path: `vision/${slug}-analysis.md`, content },
+        reason: title,
+      });
+      summary =
+        imageCount > 0
+          ? `Analysed ${imageCount} image(s) for "${title}" and wrote findings to vision/${slug}-analysis.md.`
+          : `"${title}": no images attached, nothing to analyse.`;
+      break;
+    }
+    case 'ml-engineer': {
+      const modelSlug = slug.replace(/-/g, '_');
+      actions.push(
+        {
+          tool: 'fs.write',
+          input: {
+            path: `ml/${slug}/train.py`,
+            content: `"""Training script for: ${title}\n${description}\n"""\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\nimport joblib\nimport pandas as pd\n\n\ndef load_dataset(path="data.csv"):\n    return pd.read_csv(path)\n\n\ndef train(df):\n    X, y = df.drop(columns=["label"]), df["label"]\n    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n    model = RandomForestClassifier(n_estimators=200, random_state=42)\n    model.fit(X_train, y_train)\n    accuracy = accuracy_score(y_test, model.predict(X_test))\n    joblib.dump(model, "${modelSlug}.joblib")\n    return model, accuracy\n\n\nif __name__ == "__main__":\n    _, acc = train(load_dataset())\n    print(f"holdout accuracy: {acc:.4f}")\n`,
+          },
+          reason: title,
+        },
+        {
+          tool: 'fs.write',
+          input: {
+            path: `ml/${slug}/MODEL_CARD.md`,
+            content: `# Model card — ${title}\n\n${description || 'No description given.'}\n\n- Task type: classification (adjust to the real target)\n- Training data: data.csv (replace with the real dataset)\n- Algorithm: RandomForestClassifier (scikit-learn) — swap for a DL architecture (PyTorch/TensorFlow) if the task needs one\n- Evaluation: holdout accuracy, printed by train.py\n- Artifact: ${modelSlug}.joblib\n`,
+          },
+          reason: title,
+        },
+      );
+      summary = `Scaffolded an ML training pipeline for "${title}": ml/${slug}/train.py, ml/${slug}/MODEL_CARD.md.`;
+      break;
+    }
     case 'research':
     case 'review':
     case 'architecture':
@@ -203,12 +243,13 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
     }
   }
 
+  const imageCount = request.messages.reduce((sum, m) => sum + contentImageCount(m.content), 0);
   return {
     thoughts: `Deterministic mock reasoning for ${agentKind} task "${title}".`,
     summary,
     actions: actions as unknown as JsonObject['actions'],
     confidence: 0.9,
-    echo: { promptChars: JSON.stringify(request.messages).length },
+    echo: { promptChars: JSON.stringify(request.messages).length, images: imageCount },
   } as unknown as JsonObject;
 }
 
@@ -254,14 +295,16 @@ export class MockProvider implements Provider {
         : JSON.stringify(
             {
               thoughts: 'No task metadata supplied; replying generically.',
-              summary: `Acknowledged: ${request.messages.at(-1)?.content.slice(0, 120) ?? ''}`,
+              summary: `Acknowledged: ${contentText(request.messages.at(-1)?.content ?? '').slice(0, 120)}`,
               actions: [],
             },
             null,
             2,
           );
 
-    const inputTokens = estimateTokens(`${request.system ?? ''}${request.messages.map((m) => m.content).join('')}`);
+    const inputTokens = estimateTokens(
+      `${request.system ?? ''}${request.messages.map((m) => contentText(m.content)).join('')}`,
+    );
     return {
       text,
       provider: this.kind,

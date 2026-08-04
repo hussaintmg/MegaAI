@@ -9,10 +9,34 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
+import type { ChatMessage, CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
+
+type AnthropicImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+const ANTHROPIC_IMAGE_MEDIA_TYPES: readonly AnthropicImageMediaType[] = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+];
+
+type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: AnthropicImageMediaType; data: string } };
+
+/** MegaAI's provider-agnostic content parts → Anthropic message content blocks. */
+function toAnthropicContent(content: ChatMessage['content']): string | AnthropicContentBlock[] {
+  if (typeof content === 'string') return content;
+  return content.map((part): AnthropicContentBlock => {
+    if (part.type !== 'image') return { type: 'text', text: part.text };
+    const mediaType = (ANTHROPIC_IMAGE_MEDIA_TYPES as readonly string[]).includes(part.mimeType)
+      ? (part.mimeType as AnthropicImageMediaType)
+      : 'image/png';
+    return { type: 'image', source: { type: 'base64', media_type: mediaType, data: part.data } };
+  });
+}
 
 export interface AnthropicProviderOptions {
   apiKey?: string;
@@ -60,10 +84,13 @@ export class AnthropicProvider implements Provider {
     // the Messages API takes only user/assistant turns in `messages`.
     const systemParts: string[] = [];
     if (request.system) systemParts.push(request.system);
-    const turns: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    const turns: Array<{ role: 'user' | 'assistant'; content: string | AnthropicContentBlock[] }> = [];
     for (const message of request.messages) {
-      if (message.role === 'system') systemParts.push(message.content);
-      else turns.push({ role: message.role, content: message.content });
+      if (message.role === 'system') {
+        systemParts.push(typeof message.content === 'string' ? message.content : JSON.stringify(message.content));
+      } else {
+        turns.push({ role: message.role, content: toAnthropicContent(message.content) });
+      }
     }
     if (turns.length === 0) turns.push({ role: 'user', content: '(empty)' });
 

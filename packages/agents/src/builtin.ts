@@ -143,6 +143,24 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     allowedTools: FS_TOOLS,
     defaultComplexity: 'complex',
   },
+  {
+    kind: 'vision',
+    name: 'Vision Agent',
+    description: 'Analyses screenshots, diagrams and other images attached to a task',
+    systemPrompt:
+      'You are a computer-vision analyst. Look carefully at every image attached to this task and answer what was asked about it — describe the UI, spot visual defects, read on-screen text, compare against a reference, or whatever the task requires. If no image is attached, say so instead of guessing. Write your findings to a markdown file under vision/ with the fs tools.',
+    allowedTools: FS_TOOLS,
+    defaultComplexity: 'standard',
+  },
+  {
+    kind: 'ml-engineer',
+    name: 'ML Engineer Agent',
+    description: 'Scaffolds and trains machine learning / deep learning models',
+    systemPrompt:
+      'You are a machine learning engineer. For the given task, write a working training pipeline under ml/<slug>/: a script that loads or documents the expected dataset, trains an appropriate model (classical ML via scikit-learn, or a deep learning model via PyTorch/TensorFlow when the task calls for it), evaluates it, and saves the trained artifact. Always write a MODEL_CARD.md describing the task, data, algorithm, metrics and how to reproduce training. When a shell is available, you may run the training script for real; otherwise leave clear instructions to run it.',
+    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.status'],
+    defaultComplexity: 'complex',
+  },
 ];
 
 export function createBuiltinAgents(): AgentImplementation[] {

@@ -52,7 +52,7 @@ flowchart TB
     ORC --> WF[Workflow Engine<br/>steps · retries · checkpoints · approvals]
     WF --> POL[Policy Engine<br/>rules · time windows · approvals]
     ORC --> AR[Agent Runtime<br/>spawn · heartbeat · recover]
-    AR --> AG[Agents<br/>coding · testing · review · research<br/>docs · marketing · crm · devops · architecture]
+    AR --> AG[Agents<br/>coding · testing · review · research<br/>docs · marketing · crm · devops · architecture<br/>vision · ml-engineer]
     AG --> CTX[Context Engine] --> MEM[Memory + Knowledge<br/>vector search]
     AG --> PR[Prompt Engine]
     AG --> AI[AI Session Manager<br/>fallback: anthropic → openai → gemini → mock]
@@ -130,6 +130,30 @@ without the agent noticing. Model tiers (`fast` / `balanced` / `frontier`)
 are chosen per task complexity, and failed tasks escalate to a stronger
 tier on retry.
 
+## Vision and ML/DL agents
+
+Two agent kinds reach beyond text:
+
+- **`vision`** — attach images to a task (`TaskRecord.attachments`, workspace-relative
+  paths) and the agent looks at them for real. Attachments are base64-loaded and sent
+  as native multimodal content to whichever provider answers the task (inline base64
+  for Anthropic, `image_url` data URIs for OpenAI-compatible endpoints, `inlineData`
+  for Gemini); the offline mock provider simulates seeing the image so the whole path
+  is testable with zero API keys. Findings are written to `vision/<task>-analysis.md`.
+- **`ml-engineer`** — scaffolds a training pipeline for the task under `ml/<task>/`:
+  a training/evaluation script (scikit-learn by default, swap in PyTorch/TensorFlow
+  for deep learning) and a `MODEL_CARD.md`. With the shell tool enabled it can run
+  the pipeline for real.
+
+```ts
+await megaai.planning.addTask({
+  projectId,
+  title: 'Check the homepage screenshot for layout bugs',
+  agentKind: 'vision',
+  attachments: [{ path: 'screenshots/homepage.png' }],
+});
+```
+
 ## What a goal produces
 
 Every goal gets its own sandboxed directory under `workspace/` — and every
@@ -197,7 +221,7 @@ distributed workers, and the plugin marketplace.
 
 ```bash
 npm run build     # tsc -b across all 25 workspaces
-npm test          # build + 73 tests (node:test, all offline)
+npm test          # build + 89 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
 ```

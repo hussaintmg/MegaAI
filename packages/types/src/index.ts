@@ -126,9 +126,26 @@ export interface ModelCard {
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 
+export interface ChatTextPart {
+  type: 'text';
+  text: string;
+}
+
+/** An inline image, base64-encoded — how MegaAI gives agents vision. */
+export interface ChatImagePart {
+  type: 'image';
+  /** e.g. `image/png`, `image/jpeg`. */
+  mimeType: string;
+  /** Base64-encoded image bytes (no data: URI prefix). */
+  data: string;
+}
+
+export type ChatContentPart = ChatTextPart | ChatImagePart;
+
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  /** Plain text, or a multimodal content array (text + inline images). */
+  content: string | ChatContentPart[];
 }
 
 export interface CompletionRequest {
@@ -212,6 +229,14 @@ export interface MilestoneRecord {
   order: number;
 }
 
+/** An image on disk (workspace-relative) an agent should look at, e.g. for the `vision` agent. */
+export interface TaskAttachment {
+  /** Path relative to the task's workspace root. */
+  path: string;
+  /** e.g. `image/png`; inferred from the file extension when omitted. */
+  mimeType?: string;
+}
+
 export interface TaskRecord {
   id: Id;
   projectId: Id;
@@ -226,6 +251,8 @@ export interface TaskRecord {
   dependsOn: Id[];
   attempts: number;
   maxAttempts: number;
+  /** Images the agent should see alongside the task text (vision-capable agents/providers). */
+  attachments?: TaskAttachment[];
   result?: JsonValue;
   error?: string;
   createdAt: Timestamp;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deepMerge, extractJsonObject, ManualClock, retry, Semaphore, slugify } from './index.js';
+import { contentImageCount, contentText, deepMerge, extractJsonObject, ManualClock, retry, Semaphore, slugify } from './index.js';
 
 test('retry succeeds after transient failures without real waiting', async () => {
   let calls = 0;
@@ -37,6 +37,20 @@ test('deepMerge merges objects and replaces scalars/arrays', () => {
     list: [9],
   });
   assert.deepEqual(merged, { a: { b: 1, c: 3 }, list: [9] });
+});
+
+test('contentText extracts text and contentImageCount counts images', () => {
+  assert.equal(contentText('plain string'), 'plain string');
+  assert.equal(contentImageCount('plain string'), 0);
+
+  const multimodal = [
+    { type: 'text' as const, text: 'look at this' },
+    { type: 'image' as const, mimeType: 'image/png', data: 'YWJj' },
+    { type: 'text' as const, text: ' and this' },
+    { type: 'image' as const, mimeType: 'image/png', data: 'ZGVm' },
+  ];
+  assert.equal(contentText(multimodal), 'look at this and this');
+  assert.equal(contentImageCount(multimodal), 2);
 });
 
 test('slugify produces safe names', () => {

@@ -56,7 +56,13 @@ model these plug into already exists.
 - [ ] Real build pipelines (npm install/build on top of the gated shell tool)
 - [ ] Browser automation (profiles, tabs, logins, downloads — sandboxed, allowlisted)
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
-- [ ] Vision (screenshots, UI understanding, image analysis)
+- [x] Vision v1 (`vision` agent + multimodal `ChatMessage` content): task attachments
+      are base64-loaded from the workspace and sent as real image content to
+      Anthropic/OpenAI/Gemini (inline base64 / `image_url` / `inlineData`
+      respectively); still needed: screenshotting and live UI understanding
+- [x] ML/DL agent v1 (`ml-engineer`): scaffolds and can run (via the gated shell
+      tool) a training/evaluation pipeline + model card per task; still needed:
+      real dataset ingestion, distributed/GPU training, model registry
 - [ ] Deployment integrations (Docker, VPS, Railway, Vercel, Cloudflare) behind the approval-gated `deploy` permission
 - [ ] Communication channels (email, WhatsApp, Slack, Discord, Telegram) behind `comm.send`
 - [ ] CRM integrations (clients, invoices, leads, meetings, payments)

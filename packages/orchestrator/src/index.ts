@@ -13,11 +13,12 @@
  *   Learn   — every outcome lands in the meta brain's learning store
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { JsonObject, ProjectRecord, TaskRecord, WorkflowRunRecord } from '@megaai/types';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import type { ChatContentPart, JsonObject, ProjectRecord, TaskRecord, WorkflowRunRecord } from '@megaai/types';
 import { Events, MegaError } from '@megaai/types';
 import { type Clock, newId, slugify, systemClock } from '@megaai/utils';
+import { resolveInWorkspace } from '@megaai/tools';
 import type { MegaConfig } from '@megaai/config';
 import type { Logger } from '@megaai/logger';
 import type { EventBus } from '@megaai/events';
@@ -66,6 +67,39 @@ export interface GoalResult {
   run: WorkflowRunRecord;
   tasks: TaskRecord[];
   workspaceDir: string;
+}
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+/** Max bytes read per attachment — keeps a bad/huge image from blowing up a completion request. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Loads a task's declared image attachments from its workspace and encodes
+ * them as chat content parts. Missing or oversized files are skipped rather
+ * than failing the task — vision-capable agents just see fewer images.
+ */
+export function loadTaskImages(workspaceRoot: string, task: TaskRecord): ChatContentPart[] {
+  const parts: ChatContentPart[] = [];
+  for (const attachment of task.attachments ?? []) {
+    try {
+      const target = resolveInWorkspace(workspaceRoot, attachment.path);
+      const bytes = readFileSync(target);
+      if (bytes.byteLength > MAX_IMAGE_BYTES) continue;
+      const mimeType = attachment.mimeType ?? IMAGE_MIME_TYPES[extname(attachment.path).toLowerCase()];
+      if (!mimeType) continue;
+      parts.push({ type: 'image', mimeType, data: bytes.toString('base64') });
+    } catch {
+      // Skip unreadable attachments — the agent still runs on whatever text it has.
+    }
+  }
+  return parts;
 }
 
 export class Orchestrator {
@@ -181,7 +215,12 @@ export class Orchestrator {
           ),
         buildContext: (target) => this.o.contextEngine.assemble(target),
         buildMessages: (target, contextText) =>
-          buildTaskMessages({ task: target, contextText, priorAttemptError: target.error }),
+          buildTaskMessages({
+            task: target,
+            contextText,
+            priorAttemptError: target.error,
+            images: loadTaskImages(workspaceRoot, target),
+          }),
         log: (message, fields) => agentLogger.info(message, fields),
         signal,
       },

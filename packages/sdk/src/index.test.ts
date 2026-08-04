@@ -5,9 +5,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { slugify } from '@megaai/utils';
 import { createMegaAI, Events, GitEngine, MockProvider } from './index.js';
 
 function tempDirs(): { root: string; cleanup: () => void } {
@@ -115,6 +116,101 @@ test('provider fallback: primary rate-limits mid-project, backup finishes it', a
     assert.equal(status.find((p) => p.kind === 'flaky')?.exhausted, true);
     const usage = megaai.sessions.usage();
     assert.equal(usage.requests, result.tasks.length);
+
+    await megaai.stop();
+  } finally {
+    cleanup();
+  }
+});
+
+test('the vision agent sees an attached image and reports on it', async () => {
+  const { root, cleanup } = tempDirs();
+  try {
+    const megaai = createMegaAI({
+      persistent: false,
+      quiet: true,
+      configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
+    });
+    await megaai.start();
+
+    const project = await megaai.planning.createProject({ name: 'Screenshot QA', goal: 'inspect a screenshot' });
+    const workspaceDir = join(megaai.config.system.workspaceRoot, `${slugify(project.name)}-${project.id.slice(-6)}`);
+    mkdirSync(workspaceDir, { recursive: true });
+    // A minimal (invalid, but that's fine — nothing decodes it) PNG-ish payload.
+    writeFileSync(join(workspaceDir, 'screenshot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+
+    const task = await megaai.planning.addTask({
+      projectId: project.id,
+      title: 'Check the screenshot for layout defects',
+      agentKind: 'vision',
+      attachments: [{ path: 'screenshot.png' }],
+    });
+
+    const result = await megaai.orchestrator.agents.runTask(task);
+    assert.equal(result.ok, true);
+    assert.match(result.summary, /Analysed 1 image/);
+
+    const reportPath = join(workspaceDir, 'vision', `${slugify(task.title)}-analysis.md`);
+    assert.ok(existsSync(reportPath));
+    assert.match(readFileSync(reportPath, 'utf8'), /Images inspected: 1/);
+
+    await megaai.stop();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a vision task with no attachments says so instead of hallucinating', async () => {
+  const { root, cleanup } = tempDirs();
+  try {
+    const megaai = createMegaAI({
+      persistent: false,
+      quiet: true,
+      configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
+    });
+    await megaai.start();
+
+    const project = await megaai.planning.createProject({ name: 'No image', goal: 'inspect nothing' });
+    const task = await megaai.planning.addTask({
+      projectId: project.id,
+      title: 'Look at a screenshot that was never attached',
+      agentKind: 'vision',
+    });
+
+    const result = await megaai.orchestrator.agents.runTask(task);
+    assert.equal(result.ok, true);
+    assert.match(result.summary, /no images attached/);
+
+    await megaai.stop();
+  } finally {
+    cleanup();
+  }
+});
+
+test('the ml-engineer agent scaffolds a training pipeline', async () => {
+  const { root, cleanup } = tempDirs();
+  try {
+    const megaai = createMegaAI({
+      persistent: false,
+      quiet: true,
+      configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
+    });
+    await megaai.start();
+
+    const project = await megaai.planning.createProject({ name: 'Churn model', goal: 'predict customer churn' });
+    const task = await megaai.planning.addTask({
+      projectId: project.id,
+      title: 'Train a churn prediction model',
+      agentKind: 'ml-engineer',
+    });
+
+    const result = await megaai.orchestrator.agents.runTask(task);
+    assert.equal(result.ok, true);
+
+    const workspaceDir = join(megaai.config.system.workspaceRoot, `${slugify(project.name)}-${project.id.slice(-6)}`);
+    const slug = slugify(task.title);
+    assert.ok(existsSync(join(workspaceDir, 'ml', slug, 'train.py')));
+    assert.ok(existsSync(join(workspaceDir, 'ml', slug, 'MODEL_CARD.md')));
 
     await megaai.stop();
   } finally {

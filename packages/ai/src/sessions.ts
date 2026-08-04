@@ -16,7 +16,7 @@ import type {
   TaskComplexity,
 } from '@megaai/types';
 import { Events, MegaError } from '@megaai/types';
-import { type Clock, estimateTokens, newId, systemClock } from '@megaai/utils';
+import { type Clock, contentText, estimateTokens, newId, systemClock } from '@megaai/utils';
 import type { AiSession, Provider } from '@megaai/contracts';
 import type { EventBus } from '@megaai/events';
 import type { Logger } from '@megaai/logger';
@@ -167,7 +167,7 @@ export class AiSessionManager {
   ): Promise<CompletionResponse> {
     const complexity = options.complexity ?? 'standard';
     const estimated = estimateTokens(
-      `${request.system ?? ''}${request.messages.map((message) => message.content).join('')}`,
+      `${request.system ?? ''}${request.messages.map((message) => contentText(message.content)).join('')}`,
     );
     const attempts: string[] = [];
 

@@ -100,7 +100,7 @@ system like this:
 | `prompt` | Prompt compilation + the action protocol contract | `buildSystemPrompt`, `ACTION_PROTOCOL` |
 | `context` | Budgeted context assembly from planning + memory | `ContextEngine` |
 | `code` | Code engine: git for delivery workspaces (auto-versioned deliveries, `git.*` agent tools) | `GitEngine`, `createGitTools` |
-| `agents` | Supervised agent lifecycle + 9 built-in agent kinds | `AgentRuntime`, `ModelDrivenAgent` |
+| `agents` | Supervised agent lifecycle + 11 built-in agent kinds (incl. `vision`, `ml-engineer`) | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan templates, decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |
 | `sdk` | `createMegaAI()` composition root + re-exports | `createMegaAI` |

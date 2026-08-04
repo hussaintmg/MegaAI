@@ -3,7 +3,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { MegaError, type JsonValue, type Timestamp } from '@megaai/types';
+import { MegaError, type ChatMessage, type JsonValue, type Timestamp } from '@megaai/types';
 
 /* ------------------------------------------------------------------ *
  * Ids
@@ -266,4 +266,19 @@ export function estimateTokens(text: string): number {
 export function assertDefined<T>(value: T | undefined | null, message: string): T {
   if (value === undefined || value === null) throw new MegaError('INTERNAL', message);
   return value;
+}
+
+/** The text of a (possibly multimodal) chat message content, images excluded. */
+export function contentText(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text)
+    .join('');
+}
+
+/** How many images a (possibly multimodal) chat message carries. */
+export function contentImageCount(content: ChatMessage['content']): number {
+  if (typeof content === 'string') return 0;
+  return content.filter((part) => part.type === 'image').length;
 }

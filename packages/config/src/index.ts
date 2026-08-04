@@ -113,7 +113,7 @@ export function defaultConfig(): MegaConfig {
     },
     security: {
       allowShell: false,
-      shellAllowlist: ['node', 'npm', 'git', 'ls', 'cat'],
+      shellAllowlist: ['node', 'npm', 'git', 'ls', 'cat', 'python3', 'pip'],
       httpAllowedHosts: [],
     },
     server: { host: '127.0.0.1', port: 4100 },
