@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGitTools, GitEngine } from './index.js';
@@ -84,4 +84,96 @@ test('git tools work through the tool contract and stay in the workspace', async
   } finally {
     cleanup();
   }
+});
+
+test('branches: list, create, checkout', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+    const base = await engine.currentBranch(dir);
+
+    await engine.createBranch(dir, 'feature', { checkout: true });
+    assert.equal(await engine.currentBranch(dir), 'feature');
+    assert.deepEqual(new Set(await engine.listBranches(dir)), new Set([base, 'feature']));
+
+    await engine.checkout(dir, base!);
+    assert.equal(await engine.currentBranch(dir), base);
+
+    await assert.rejects(engine.checkout(dir, 'does-not-exist'), /git checkout failed/);
+    await assert.rejects(engine.createBranch(dir, ''), /must not be empty/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge: fast-forwards cleanly and reports conflicts without leaving one behind', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'shared.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+    const base = await engine.currentBranch(dir);
+
+    await engine.createBranch(dir, 'feature', { checkout: true });
+    writeFileSync(join(dir, 'feature.txt'), 'new file\n');
+    await engine.commitAll(dir, 'feature work');
+    await engine.checkout(dir, base!);
+
+    const clean = await engine.merge(dir, 'feature');
+    assert.equal(clean.merged, true);
+    assert.equal(clean.conflict, false);
+    assert.ok(clean.sha);
+    assert.ok(existsSync(join(dir, 'feature.txt')));
+
+    // Now create a genuine conflict.
+    await engine.createBranch(dir, 'conflict-a', { checkout: true });
+    writeFileSync(join(dir, 'shared.txt'), 'from a\n');
+    await engine.commitAll(dir, 'a change');
+    await engine.checkout(dir, base!);
+    await engine.createBranch(dir, 'conflict-b', { checkout: true });
+    writeFileSync(join(dir, 'shared.txt'), 'from b\n');
+    await engine.commitAll(dir, 'b change');
+
+    const conflict = await engine.merge(dir, 'conflict-a');
+    assert.equal(conflict.merged, false);
+    assert.equal(conflict.conflict, true);
+    // Merge was aborted: workspace is clean and still on conflict-b.
+    assert.deepEqual(await engine.status(dir), []);
+    assert.equal(await engine.currentBranch(dir), 'conflict-b');
+  } finally {
+    cleanup();
+  }
+});
+
+test('push: publishes the current branch to a remote', async () => {
+  const { dir: remoteDir, cleanup: cleanupRemote } = workspace();
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    const bare = await engine.run(remoteDir, ['init', '--bare']);
+    assert.equal(bare.exitCode, 0);
+
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'base');
+    await engine.addRemote(dir, 'origin', remoteDir);
+    assert.deepEqual(await engine.listRemotes(dir), ['origin']);
+
+    const branch = await engine.currentBranch(dir);
+    const pushed = await engine.push(dir, { setUpstream: true });
+    assert.equal(pushed.exitCode, 0);
+
+    const remoteLog = await engine.run(remoteDir, ['log', '--pretty=%s', branch!]);
+    assert.match(remoteLog.stdout, /base/);
+  } finally {
+    cleanup();
+    cleanupRemote();
+  }
+});
+
+test('git.push tool carries the git.push permission so policy can gate it', () => {
+  const [, , , , , , , , push] = createGitTools();
+  assert.equal(push!.name, 'git.push');
+  assert.deepEqual(push!.permissions, ['git.push']);
 });
