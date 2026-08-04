@@ -55,7 +55,11 @@ model these plug into already exists.
 - [x] Real build pipelines: `pipeline.run` (ordered, fail-fast, allowlisted)
       + a build agent that syntax-checks every source file; a broken build
       fails the task and triggers recovery
-- [ ] Git collaboration (branches, merge, remote push behind approval)
+- [x] Git collaboration (`@megaai/code`): `git.branch.create/list`, `git.checkout`,
+      `git.merge` (no-fast-forward, conflicts reported not thrown) — all
+      `git.write`; `git.remote.add`; `git.push` on its own `git.push`
+      permission, approval-gated by default and checked against an optional
+      remote host allowlist
 - [ ] `npm install`/`npm build` pipelines for dependency-bearing projects
 - [x] Browser automation v1 (`@megaai/browser`): pluggable driver — offline
       deterministic simulator by default, optional real Chromium via

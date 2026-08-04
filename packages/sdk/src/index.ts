@@ -193,7 +193,9 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     shellAllowlist: config.security.shellAllowlist,
     httpAllowedHosts: config.security.httpAllowedHosts,
   });
-  for (const tool of createGitTools(new GitEngine())) tools.register(tool);
+  for (const tool of createGitTools(new GitEngine({ remoteAllowlist: config.security.gitRemoteAllowlist }))) {
+    tools.register(tool);
+  }
   const browserEngine = new BrowserEngine({
     allowedHosts: config.security.browserAllowedHosts,
     preferReal: config.security.allowBrowser,

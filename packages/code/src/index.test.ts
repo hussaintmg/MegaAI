@@ -85,3 +85,128 @@ test('git tools work through the tool contract and stay in the workspace', async
     cleanup();
   }
 });
+
+test('branch, checkout and merge a local branch', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'a.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+    assert.equal(await engine.currentBranch(dir), 'main');
+
+    await engine.createBranch(dir, 'feature');
+    assert.equal(await engine.currentBranch(dir), 'feature');
+    assert.deepEqual((await engine.listBranches(dir)).sort(), ['feature', 'main']);
+
+    writeFileSync(join(dir, 'b.txt'), 'feature work\n');
+    await engine.commitAll(dir, 'feature work');
+
+    await engine.checkout(dir, 'main');
+    assert.equal(await engine.currentBranch(dir), 'main');
+
+    const merged = await engine.merge(dir, 'feature');
+    assert.equal(merged.merged, true);
+    assert.ok(merged.sha);
+    const log = await engine.log(dir);
+    assert.deepEqual(
+      log.map((entry) => entry.message).sort(),
+      ["Merge branch 'feature'", 'base', 'feature work'].sort(),
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('merge reports conflicts instead of throwing and leaves a clean state', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    writeFileSync(join(dir, 'x.txt'), 'main v1\n');
+    await engine.commitAll(dir, 'base');
+
+    await engine.createBranch(dir, 'feature');
+    writeFileSync(join(dir, 'x.txt'), 'feature change\n');
+    await engine.commitAll(dir, 'feature change');
+
+    await engine.checkout(dir, 'main');
+    writeFileSync(join(dir, 'x.txt'), 'main change\n');
+    await engine.commitAll(dir, 'main change');
+
+    const result = await engine.merge(dir, 'feature');
+    assert.equal(result.merged, false);
+    assert.equal(result.conflict, true);
+    assert.deepEqual(await engine.status(dir), []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('addRemote and push publish to a local bare remote', async () => {
+  const { dir: remoteDir, cleanup: cleanupRemote } = workspace();
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    await engine.run(remoteDir, ['init', '--bare']);
+
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'first');
+    await engine.addRemote(dir, 'origin', remoteDir);
+
+    const pushed = await engine.push(dir, { setUpstream: true });
+    assert.equal(pushed.pushed, true);
+    assert.equal(pushed.remote, 'origin');
+    assert.equal(pushed.branch, 'main');
+
+    const remoteLog = await engine.run(remoteDir, ['log', '--all', '--pretty=%s']);
+    assert.match(remoteLog.stdout, /first/);
+  } finally {
+    cleanup();
+    cleanupRemote();
+  }
+});
+
+test('push is rejected when the remote host is not on the allowlist', async () => {
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine({ remoteAllowlist: ['github.com'] });
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    await engine.commitAll(dir, 'first');
+    await engine.addRemote(dir, 'origin', 'https://gitlab.com/example/repo.git');
+
+    await assert.rejects(engine.push(dir), /not on the git remote allowlist/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('git tools expose branch, merge, remote and push', async () => {
+  const { dir: remoteDir, cleanup: cleanupRemote } = workspace();
+  const { dir, cleanup } = workspace();
+  try {
+    const engine = new GitEngine();
+    await engine.run(remoteDir, ['init', '--bare']);
+    const [, , , , branchList, branchCreate, checkout, merge, remoteAdd, push] = createGitTools(engine);
+
+    writeFileSync(join(dir, 'a.txt'), 'base\n');
+    await engine.commitAll(dir, 'base');
+
+    await branchCreate!.execute({ name: 'feature' }, { workspaceRoot: dir });
+    writeFileSync(join(dir, 'b.txt'), 'feature\n');
+    await engine.commitAll(dir, 'feature work');
+
+    const listed = (await branchList!.execute({}, { workspaceRoot: dir })) as { branches: string[]; current: string };
+    assert.equal(listed.current, 'feature');
+    assert.ok(listed.branches.includes('main'));
+
+    await checkout!.execute({ branch: 'main' }, { workspaceRoot: dir });
+    const merged = (await merge!.execute({ branch: 'feature' }, { workspaceRoot: dir })) as { merged: boolean };
+    assert.equal(merged.merged, true);
+
+    await remoteAdd!.execute({ name: 'origin', url: remoteDir }, { workspaceRoot: dir });
+    const pushed = (await push!.execute({ setUpstream: true }, { workspaceRoot: dir })) as { pushed: boolean };
+    assert.equal(pushed.pushed, true);
+  } finally {
+    cleanup();
+    cleanupRemote();
+  }
+});

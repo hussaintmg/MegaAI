@@ -70,6 +70,8 @@ export interface MegaConfig {
     /** When true, browser.* tools try the real Playwright driver. */
     allowBrowser: boolean;
     browserAllowedHosts: string[];
+    /** Hosts `git.push` may target. Empty means unrestricted (approval gate still applies). */
+    gitRemoteAllowlist: string[];
   };
   server: {
     host: string;
@@ -116,7 +118,7 @@ export function defaultConfig(): MegaConfig {
     },
     policy: {
       autoApprove: false,
-      approvalRequiredPermissions: ['deploy', 'shell.exec', 'comm.send'],
+      approvalRequiredPermissions: ['deploy', 'shell.exec', 'comm.send', 'git.push'],
       deniedPermissions: [],
     },
     workflow: { maxStepAttempts: 3, stepRetryBaseMs: 250 },
@@ -132,6 +134,7 @@ export function defaultConfig(): MegaConfig {
       httpAllowedHosts: [],
       allowBrowser: false,
       browserAllowedHosts: [],
+      gitRemoteAllowlist: [],
     },
     server: { host: '127.0.0.1', port: 4100 },
     deploy: { defaultTarget: 'simulated' },
