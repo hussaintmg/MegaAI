@@ -67,8 +67,19 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'Coding Agent',
     description: 'Implements features, writes and edits source code',
     systemPrompt:
-      'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders. Commit finished work with git.commit.',
-    allowedTools: [...FS_TOOLS, 'fs.delete', 'shell.exec', 'git.commit', 'git.status', 'git.diff'],
+      'You are a senior software engineer. Implement the task by writing clean, working code with the fs tools. Keep files small and cohesive, follow the conventions already present in the workspace, and never leave placeholders. Commit finished work with git.commit; use git.branch.create/git.checkout/git.merge to work on a branch and integrate it. Pushing to a remote is a separate, human-approved step, not yours to take.',
+    allowedTools: [
+      ...FS_TOOLS,
+      'fs.delete',
+      'shell.exec',
+      'git.commit',
+      'git.status',
+      'git.diff',
+      'git.branch.list',
+      'git.branch.create',
+      'git.checkout',
+      'git.merge',
+    ],
     defaultComplexity: 'complex',
   },
   {
@@ -130,8 +141,16 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     name: 'DevOps Agent',
     description: 'Prepares builds, deployment plans and release checklists',
     systemPrompt:
-      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated.',
-    allowedTools: [...FS_TOOLS, 'shell.exec', 'git.commit', 'git.log', 'git.status'],
+      'You are a DevOps engineer. Prepare deployment configuration and a rollout plan for the task. Deployment execution is simulated in this phase — write the plan and configs; the deploy permission is approval-gated. You may configure a remote with git.remote.add and push with git.push, but both require human approval before they run.',
+    allowedTools: [
+      ...FS_TOOLS,
+      'shell.exec',
+      'git.commit',
+      'git.log',
+      'git.status',
+      'git.remote.add',
+      'git.push',
+    ],
     defaultComplexity: 'standard',
   },
   {
