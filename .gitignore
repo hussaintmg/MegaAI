@@ -22,3 +22,6 @@ notebooks/*.zip
 .DS_Store
 .idea/
 .vscode/
+
+# sklearn pkl output
+notebooks/megaai-models-pkl/
