@@ -37,6 +37,7 @@ import { WorkflowEngine } from '@megaai/workflow';
 import { createCommandRunner, createToolRegistry, ToolRegistry } from '@megaai/tools';
 import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
+import { createVisionTools, VisionTester } from '@megaai/vision';
 import { createDeployTools, DeployEngine, type DeployTarget } from '@megaai/deploy';
 import { CapturedChannel, CommEngine, createCommTool, NotificationEngine, WebhookChannel } from '@megaai/comm';
 import { ContextEngine } from '@megaai/context';
@@ -85,6 +86,7 @@ export interface MegaAI {
   meta: MetaBrain;
   comm: CommEngine;
   notifications: NotificationEngine;
+  vision: VisionTester;
   orchestrator: Orchestrator;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -200,6 +202,13 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     logger: (message, fields) => logger.child('browser').info(message, fields),
   });
   for (const tool of createBrowserTools(browserEngine)) tools.register(tool);
+  // Vision/UI testing: static analysis always; real headless Chromium when
+  // the browser is allowed (and playwright-core + Chromium are present).
+  const vision = new VisionTester({
+    preferBrowser: config.security.allowBrowser,
+    logger: (message, fields) => logger.child('vision').info(message, fields),
+  });
+  for (const tool of createVisionTools(vision)) tools.register(tool);
   // Deploy: real execution only when a shell is allowed (and the binary is on
   // the allowlist); otherwise every target simulates. Publishing stays behind
   // the approval-gated `deploy` permission regardless.
@@ -305,6 +314,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     meta,
     comm,
     notifications,
+    vision,
     orchestrator,
     async start() {
       if (started) return;
@@ -356,3 +366,5 @@ export { DeployEngine, createDeployTools, DEPLOY_TARGETS } from '@megaai/deploy'
 export type { DeployTarget, DeployPlan, DeployResult } from '@megaai/deploy';
 export { CommEngine, CapturedChannel, WebhookChannel, NotificationEngine, createCommTool } from '@megaai/comm';
 export type { Channel, OutboundMessage, SendReceipt } from '@megaai/comm';
+export { VisionTester, StaticTestDriver, BrowserTestDriver, classifyPurposeHeuristic, createVisionTools } from '@megaai/vision';
+export type { AuditReport, UiElement, PurposeClassifier } from '@megaai/vision';

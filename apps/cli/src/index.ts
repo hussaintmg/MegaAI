@@ -64,7 +64,7 @@ function watchProgress(megaai: MegaAI): void {
 
 async function executeGoal(
   goal: string,
-  options: { persistent: boolean; quiet: boolean; modelPlanner?: boolean },
+  options: { persistent: boolean; quiet: boolean; modelPlanner?: boolean; realBrowser?: boolean },
 ): Promise<number> {
   const megaai = createMegaAI({
     persistent: options.persistent,
@@ -73,7 +73,7 @@ async function executeGoal(
       policy: { autoApprove: true },
       // Let the testing agent really execute suites (node --test) and let
       // coding agents commit; both stay allowlisted and sandboxed.
-      security: { allowShell: true },
+      security: { allowShell: true, allowBrowser: options.realBrowser ?? false },
       // Ask the AI to plan when requested (uses the mock offline, real
       // providers when a key is set); templates otherwise.
       meta: { planner: options.modelPlanner ? 'model' : 'template' },
@@ -169,13 +169,14 @@ async function main(): Promise<number> {
   const [, , command, ...rest] = process.argv;
   const quiet = rest.includes('--quiet');
   const modelPlanner = rest.includes('--model-planner');
+  const realBrowser = rest.includes('--browser');
   const positional = rest.filter((arg) => !arg.startsWith('--'));
 
   switch (command) {
     case 'demo':
       return executeGoal(
         'Build a complete ecommerce store for a client: product catalog, cart, checkout and authentication',
-        { persistent: false, quiet, modelPlanner },
+        { persistent: false, quiet, modelPlanner, realBrowser },
       );
     case 'run': {
       const goal = positional.join(' ').trim();
@@ -183,7 +184,7 @@ async function main(): Promise<number> {
         process.stderr.write(`${red('error:')} megaai run needs a goal, e.g. megaai run "Build a blog"\n`);
         return 2;
       }
-      return executeGoal(goal, { persistent: true, quiet, modelPlanner });
+      return executeGoal(goal, { persistent: true, quiet, modelPlanner, realBrowser });
     }
     case 'plan': {
       const goal = positional.join(' ').trim();

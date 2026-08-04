@@ -64,7 +64,15 @@ model these plug into already exists.
       browser agent kind
 - [ ] Browser sessions: profiles, tabs, cookies, logins, downloads
 - [ ] Desktop automation (mouse, keyboard, clipboard, OCR, windows)
-- [ ] Vision (screenshots, UI understanding, image analysis)
+- [x] Vision / UI testing engine (`@megaai/vision`): static HTML analysis
+      (always on) + real headless Chromium (via `playwright-core` against the
+      pre-installed browser) — responsive overflow across viewports, captured
+      console/JS errors, accessibility, navigation-timing performance, UI
+      element detection with purpose classification, full-page screenshots and
+      mouse/keyboard interaction. `vision.audit/screenshot/interact` tools,
+      vision-testing agent, wired into ecommerce/website plans. Run with
+      `megaai run "…" --browser`.
+- [ ] Deeper vision: image/object analysis, visual diffing, OCR
 - [x] Deployment engine v1 (`@megaai/deploy`): pure `deploy.plan` + approval-gated
       `deploy.execute`; simulated target by default (records `.megaai-deploy.json`
       with a URL), Docker/Vercel/Railway/static adapters as command lists run by

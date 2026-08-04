@@ -68,6 +68,9 @@
       "path": "packages/comm"
     },
     {
+      "path": "packages/vision"
+    },
+    {
       "path": "packages/context"
     },
     {

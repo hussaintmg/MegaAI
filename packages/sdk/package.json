@@ -43,6 +43,7 @@
     "@megaai/tools": "0.1.0",
     "@megaai/types": "0.1.0",
     "@megaai/utils": "0.1.0",
+    "@megaai/vision": "0.1.0",
     "@megaai/workflow": "0.1.0"
   },
   "license": "MIT"

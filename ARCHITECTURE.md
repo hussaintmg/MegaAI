@@ -103,6 +103,7 @@ system like this:
 | `browser` | Browser automation: pluggable driver (offline simulator + optional Playwright), `browser.*` tools gated on `net.browser` | `BrowserEngine`, `SimulatedDriver`, `createBrowserTools` |
 | `deploy` | Deployment engine: pure `deploy.plan` + approval-gated `deploy.execute`; simulated by default, Docker/Vercel/Railway adapters | `DeployEngine`, `createDeployTools` |
 | `comm` | Communication engine: channels (captured/webhook), `comm.send` tool (gated), event-driven `NotificationEngine` for operator updates | `CommEngine`, `NotificationEngine`, `createCommTool` |
+| `vision` | Vision/UI testing: static HTML analysis + real headless Chromium (responsive, console errors, a11y, performance, element detection, mouse/keyboard); `vision.*` tools | `VisionTester`, `StaticTestDriver`, `BrowserTestDriver` |
 | `agents` | Supervised agent lifecycle + 12 built-in agent kinds (coding, testing, build, review, research, browser, documentation, marketing, crm, devops, architecture, support) | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan generation (templates or model-backed via `makePlan`), decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan`, `parsePlanSpec` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |

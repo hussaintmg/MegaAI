@@ -140,6 +140,7 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
           tasks: [
             task('Build verification', 'build', 'standard', 'Verify every source file builds and parses cleanly'),
             task('Automated test suite', 'testing', 'standard', 'Tests covering auth, catalog and checkout behaviour'),
+            task('Visual and responsive testing', 'vision-testing', 'standard', 'Check the storefront renders responsively without console errors'),
             task('Code review pass', 'review', 'standard', 'Review all modules for defects and risks'),
           ],
         },
@@ -237,6 +238,7 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
           name: 'Quality & launch',
           tasks: [
             task('Automated test suite', 'testing', 'trivial', 'Smoke tests for the site'),
+            task('Visual and responsive testing', 'vision-testing', 'standard', 'Check the site renders responsively without console errors'),
             task('Launch marketing content', 'marketing', 'trivial', 'Announcement and SEO copy'),
             task('Deployment preparation', 'devops', 'standard', 'Hosting plan and configs'),
           ],

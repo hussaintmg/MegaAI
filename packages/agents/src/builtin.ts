@@ -117,6 +117,15 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
     defaultComplexity: 'standard',
   },
   {
+    kind: 'vision-testing',
+    name: 'Vision Testing Agent',
+    description: 'Visually tests UIs: responsiveness, console errors, accessibility, performance, mouse/keyboard',
+    systemPrompt:
+      'You are a visual QA agent. Use vision.audit on the built UI to check responsiveness across viewports, JS/console errors, accessibility and performance; use vision.interact for mouse/keyboard flows. Report every issue you find with its severity.',
+    allowedTools: ['vision.audit', 'vision.screenshot', 'vision.interact', 'fs.read', 'fs.list', 'fs.write'],
+    defaultComplexity: 'standard',
+  },
+  {
     kind: 'documentation',
     name: 'Documentation Agent',
     description: 'Writes user and developer documentation',

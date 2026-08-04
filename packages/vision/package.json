@@ -1,0 +1,29 @@
+{
+  "name": "@megaai/vision",
+  "version": "0.1.0",
+  "description": "Vision / UI testing engine: real-browser and static drivers for responsive, console-error, accessibility, performance and element-detection checks",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@megaai/contracts": "0.1.0",
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0"
+  },
+  "optionalDependencies": {
+    "playwright-core": "^1.49.0"
+  },
+  "license": "MIT"
+}
