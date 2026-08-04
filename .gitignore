@@ -27,3 +27,5 @@ notebooks/*.zip
 
 # sklearn pkl output
 notebooks/megaai-models-pkl/
+__pycache__/
+*.pyc
