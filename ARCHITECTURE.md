@@ -99,7 +99,7 @@ system like this:
 | `actions` | Parse model proposals, authorise (allowlist → grants → policy → approvals), execute, report | `ActionEngine`, `parseProposal` |
 | `prompt` | Prompt compilation + the action protocol contract | `buildSystemPrompt`, `ACTION_PROTOCOL` |
 | `context` | Budgeted context assembly from planning + memory | `ContextEngine` |
-| `code` | Code engine: git for delivery workspaces (auto-versioned deliveries, `git.*` agent tools) | `GitEngine`, `createGitTools` |
+| `code` | Code engine: git for delivery workspaces (auto-versioned deliveries, `git.*` agent tools for commit/branch/merge/push — push is approval-gated) | `GitEngine`, `createGitTools` |
 | `agents` | Supervised agent lifecycle + 9 built-in agent kinds | `AgentRuntime`, `ModelDrivenAgent` |
 | `meta-brain` | Goal analysis, plan templates, decisions (complexity/concurrency/retry), learning store | `MetaBrain`, `generatePlan` |
 | `orchestrator` | Wires everything: goal → plan → workflow → agents → report | `Orchestrator` |
