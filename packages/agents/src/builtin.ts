@@ -38,23 +38,71 @@ export class ModelDrivenAgent implements AgentImplementation {
     });
 
     const proposal = parseProposal(response.text);
+
+    // A reply nobody could parse is a failed attempt, not a finished task.
+    // Reporting it as success is how a run completed fourteen tasks and
+    // delivered two files: five coding agents answered with JSON that broke
+    // mid-file, every one of them was recorded as done, and nothing was
+    // written. Failing here sends the task back with the reason attached, and
+    // the retry prompt tells the model what went wrong.
+    if (proposal.unparsed) {
+      const error =
+        'the reply was not valid JSON in the action protocol — it may have been cut off mid-file. ' +
+        'Answer with the JSON object only, and write fewer files in one go if the reply is long.';
+      await ctx.remember(`[${this.descriptor.kind}] ${task.title}: unparseable reply`, [
+        this.descriptor.kind,
+        'failure',
+      ]);
+      return {
+        ok: false,
+        summary: `Could not read the model's reply for "${task.title}".`,
+        output: { provider: response.provider, model: response.model, rawPreview: response.text.slice(0, 400) },
+        actions: [],
+        usage: response.usage,
+        error,
+      };
+    }
+
     const actionResults = await ctx.act(proposal.actions);
     const failures = actionResults.filter((result) => !result.ok);
-    const ok = failures.length === 0;
+    let ok = failures.length === 0;
+    let error = ok ? undefined : failures.map((failure) => `${failure.tool}: ${failure.error}`).join('; ');
 
+    // An agent whose whole job is to produce files, producing none, has not
+    // done the task — however confident its summary sounds.
+    if (ok && this.descriptor.mustAct === true && actionResults.length === 0) {
+      ok = false;
+      error =
+        'the reply proposed no actions, so nothing was written. ' +
+        (proposal.repaired
+          ? 'The reply was truncated — write fewer files in one go.'
+          : 'Emit fs.write actions for the files this task calls for.');
+    }
+    // The action that was mid-write when a reply was cut off arrives with
+    // pieces missing, and the tool rejects it. Say why, so the retry knows.
+    if (!ok && proposal.repaired) {
+      error = `the reply was cut off mid-file and only partially recovered — write fewer files in one go. Underlying: ${error}`;
+    }
+
+    const note = proposal.repaired ? ' (reply was truncated and partially recovered)' : '';
     await ctx.remember(
-      `[${this.descriptor.kind}] ${task.title}: ${proposal.summary}` +
-        (ok ? '' : ` (${failures.length} action(s) failed)`),
+      `[${this.descriptor.kind}] ${task.title}: ${proposal.summary}${note}` +
+        (failures.length > 0 ? ` (${failures.length} action(s) failed)` : ''),
       [this.descriptor.kind, ok ? 'success' : 'failure'],
     );
 
     return {
       ok,
-      summary: proposal.summary,
-      output: { summary: proposal.summary, provider: response.provider, model: response.model },
+      summary: proposal.summary + note,
+      output: {
+        summary: proposal.summary,
+        provider: response.provider,
+        model: response.model,
+        ...(proposal.repaired ? { repaired: true } : {}),
+      },
       actions: actionResults,
       usage: response.usage,
-      error: ok ? undefined : failures.map((failure) => `${failure.tool}: ${failure.error}`).join('; '),
+      error,
     };
   }
 }
@@ -78,9 +126,14 @@ export const BUILTIN_AGENT_DESCRIPTORS: AgentDescriptor[] = [
       'Split the work across the files the layout calls for — a component per component, a route ' +
       'per route, data access in its own module. One enormous file is a defect even when it works.\n' +
       'What you write has to compile and run: imports must resolve, dependencies you use must be ' +
-      'in package.json, and types must line up. Commit finished work with git.commit.',
+      'in package.json, and types must line up. Commit finished work with git.commit.\n' +
+      'Your whole reply is one JSON object, and file contents live inside JSON strings — so every ' +
+      'newline, quote and backslash in the code must be escaped. If a reply runs long, write the ' +
+      'most important files now and say in the summary what remains: a reply cut off mid-file ' +
+      'loses the files after it too.',
     allowedTools: [...FS_TOOLS, 'fs.delete', 'shell.exec', 'git.commit', 'git.status', 'git.diff'],
     defaultComplexity: 'complex',
+    mustAct: true,
   },
   {
     kind: 'testing',

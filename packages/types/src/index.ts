@@ -314,6 +314,11 @@ export interface AgentDescriptor {
   /** Tool names this agent may request. */
   allowedTools: string[];
   defaultComplexity: TaskComplexity;
+  /**
+   * This agent's output IS files. A reply that proposes no actions has not
+   * done the task, no matter how confidently it says otherwise.
+   */
+  mustAct?: boolean;
 }
 
 export interface AgentInstanceInfo {

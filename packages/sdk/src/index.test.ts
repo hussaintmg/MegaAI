@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMegaAI, Events, GitEngine, MockProvider } from './index.js';
+import type { Provider } from '@megaai/contracts';
 
 function tempDirs(): { root: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'megaai-e2e-'));
@@ -251,4 +252,125 @@ test('an explicit framework in the goal outranks the domain default', async () =
   assert.equal(analyzeGoal('build an online store for shoes').stack.id, 'nextjs');
   // A headless goal gets a service, not a web app.
   assert.equal(analyzeGoal('write a cli tool that renames files').stack.id, 'node-api');
+});
+
+test('a model that answers with broken JSON fails the task instead of delivering nothing', async () => {
+  // The failure this reproduces: Gemini answered every request, every task
+  // was marked completed, and the delivery was two marketing files. The five
+  // coding replies had been cut off mid-file, the parser gave up, and the
+  // agent reported success with zero actions.
+  const { root, cleanup } = tempDirs();
+  try {
+    let codingReplies = 0;
+    const truncating: Provider = {
+      kind: 'truncating',
+      name: 'Truncating',
+      models: () => [],
+      isConfigured: () => true,
+      async complete(request) {
+        const kind = String(request.metadata?.agentKind ?? '');
+        const text =
+          kind === 'coding'
+            ? (codingReplies++,
+              '{"thoughts":"scaffolding","actions":[{"tool":"fs.write","input":{"path":"app/page.tsx","content":"export default function P() { return <div>hel')
+            : '{"summary":"done","actions":[]}';
+        return {
+          text,
+          provider: 'truncating',
+          model: 'truncating-1',
+          stopReason: 'max_tokens',
+          usage: { inputTokens: 10, outputTokens: 10 },
+        };
+      },
+    };
+
+    const megaai = createMegaAI({
+      persistent: false,
+      quiet: true,
+      configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
+      configOverrides: {
+        policy: { autoApprove: true },
+        ai: {
+          fallbackChain: ['truncating'],
+          providers: { truncating: { enabled: true }, mock: { enabled: false } },
+        },
+      },
+      extraProviders: [truncating],
+    });
+    await megaai.start();
+    const result = await megaai.submitGoal('build 3d car website');
+
+    const coding = result.tasks.filter((task) => task.agentKind === 'coding');
+    assert.ok(coding.length >= 4, 'the plan really did ask for several coding tasks');
+    assert.equal(
+      coding.every((task) => task.state === 'failed'),
+      true,
+      `coding tasks must fail when nothing was written, got: ${coding.map((t) => t.state).join(', ')}`,
+    );
+    assert.match(coding[0]?.error ?? '', /cut off mid-file|no actions|not valid JSON/i);
+    assert.notEqual(result.project.status, 'completed', 'a run that wrote no code is not a success');
+    assert.ok(codingReplies > coding.length, 'each failed task was retried before being given up on');
+
+    await megaai.stop();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a truncated reply still delivers the files that survived it', async () => {
+  const { root, cleanup } = tempDirs();
+  try {
+    const partial: Provider = {
+      kind: 'partial',
+      name: 'Partial',
+      models: () => [],
+      isConfigured: () => true,
+      async complete(request) {
+        const kind = String(request.metadata?.agentKind ?? '');
+        // Two complete files, then the reply is cut off inside the third.
+        const text =
+          kind === 'coding'
+            ? '{"thoughts":"t","actions":[' +
+              '{"tool":"fs.write","input":{"path":"package.json","content":"{\\"name\\":\\"site\\"}"}},' +
+              '{"tool":"fs.write","input":{"path":"app/page.tsx","content":"export default function P() { return null; }"}},' +
+              '{"tool":"fs.write","input":{"path":"app/layout.tsx","content":"export default function L(' 
+            : '{"summary":"done","actions":[]}';
+        return {
+          text,
+          provider: 'partial',
+          model: 'partial-1',
+          stopReason: 'max_tokens',
+          usage: { inputTokens: 10, outputTokens: 10 },
+        };
+      },
+    };
+
+    const megaai = createMegaAI({
+      persistent: false,
+      quiet: true,
+      configOptions: { cwd: root, env: {} as NodeJS.ProcessEnv },
+      configOverrides: {
+        policy: { autoApprove: true },
+        ai: {
+          fallbackChain: ['partial'],
+          providers: { partial: { enabled: true }, mock: { enabled: false } },
+        },
+      },
+      extraProviders: [partial],
+    });
+    await megaai.start();
+    const result = await megaai.submitGoal('build 3d car website');
+
+    // The two complete files were written; the half-written one was dropped.
+    assert.ok(existsSync(join(result.workspaceDir, 'package.json')), 'the first complete file survived');
+    assert.ok(existsSync(join(result.workspaceDir, 'app', 'page.tsx')), 'the second complete file survived');
+    assert.equal(existsSync(join(result.workspaceDir, 'app', 'layout.tsx')), false, 'the truncated file is not written');
+
+    const coding = result.tasks.find((task) => task.agentKind === 'coding');
+    assert.equal(coding?.state, 'completed', 'a partial recovery that wrote files is still progress');
+
+    await megaai.stop();
+  } finally {
+    cleanup();
+  }
 });

@@ -238,6 +238,106 @@ export function extractJsonObject(text: string): JsonValue | undefined {
   return undefined;
 }
 
+/**
+ * Escape the control characters a model leaves raw inside a JSON string.
+ *
+ * Asking for source code inside a JSON string value is asking for this: a
+ * literal newline in a 200-line `.tsx` file is invalid JSON, and one of them
+ * destroys the entire reply — including the other nine files that were fine.
+ */
+function escapeControlCharsInStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        out += ch;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        out += ch;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        out += ch;
+        continue;
+      }
+      if (ch === '\n') out += '\\n';
+      else if (ch === '\r') out += '\\r';
+      else if (ch === '\t') out += '\\t';
+      else if (ch < ' ') out += `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      else out += ch;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * Recover a usable object from JSON that is malformed or cut off.
+ *
+ * A reply that hits the output-token ceiling stops mid-string, so the braces
+ * never balance and a strict parse yields nothing at all — which is how five
+ * coding tasks reported success having written no files. Rather than lose the
+ * whole reply, close the structure at the last point it was complete and keep
+ * everything up to there.
+ */
+export function repairJsonObject(text: string): JsonValue | undefined {
+  const start = text.indexOf('{');
+  if (start === -1) return undefined;
+  const src = escapeControlCharsInStrings(text.slice(start));
+
+  // The control characters may have been the only problem.
+  const whole = safeJsonParse(src);
+  if (whole !== undefined) return whole;
+
+  // Points at which the document was structurally complete, with the
+  // containers still open there. Kept apart because cutting after a closing
+  // brace ends a whole element, while cutting at a comma can leave the item
+  // we were in the middle of — half an `fs.write` with a path and no content.
+  const closers: Array<{ index: number; open: string[] }> = [];
+  const commas: Array<{ index: number; open: string[] }> = [];
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' || ch === ']') {
+      stack.pop();
+      if (stack.length === 0) {
+        // A complete top-level object: nothing to repair past here.
+        const parsed = safeJsonParse(src.slice(0, i + 1));
+        if (parsed !== undefined) return parsed;
+      }
+      closers.push({ index: i + 1, open: [...stack] });
+    } else if (ch === ',') {
+      commas.push({ index: i, open: [...stack] });
+    }
+  }
+
+  // Newest first within each group: the later the cut, the more survives.
+  for (const cut of [...closers.slice(-60).reverse(), ...commas.slice(-60).reverse()]) {
+    const closing = [...cut.open].reverse().map((c) => (c === '{' ? '}' : ']')).join('');
+    const parsed = safeJsonParse(src.slice(0, cut.index) + closing);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
 export function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let value = bytes;

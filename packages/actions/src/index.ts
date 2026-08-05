@@ -10,7 +10,7 @@
 
 import type { ActionRequest, ActionResult, JsonObject } from '@megaai/types';
 import { Events, MegaError } from '@megaai/types';
-import { type Clock, extractJsonObject, isPlainObject, systemClock } from '@megaai/utils';
+import { type Clock, extractJsonObject, isPlainObject, repairJsonObject, systemClock } from '@megaai/utils';
 import type { ToolRegistry, ToolContext } from '@megaai/tools';
 import type { ApprovalManager, PolicyEngine } from '@megaai/policy';
 import type { EventBus } from '@megaai/events';
@@ -20,14 +20,29 @@ export interface ParsedProposal {
   thoughts?: string;
   summary: string;
   actions: ActionRequest[];
+  /** The reply was salvaged from malformed or truncated JSON. */
+  repaired?: boolean;
+  /**
+   * Nothing usable came back. The caller must treat this as a failed attempt —
+   * silently reporting success with zero actions is how a run finished every
+   * task and delivered no files.
+   */
+  unparsed?: boolean;
 }
 
 /** Parse the action protocol out of free-form model output. */
 export function parseProposal(text: string): ParsedProposal {
-  const parsed = extractJsonObject(text);
+  let repaired = false;
+  let parsed = extractJsonObject(text);
   if (!isPlainObject(parsed)) {
-    // No JSON at all — treat the whole text as a summary with no actions.
-    return { summary: text.trim().slice(0, 2_000), actions: [] };
+    // Source code inside a JSON string breaks in two predictable ways: raw
+    // newlines the model did not escape, and a reply cut off at the output
+    // ceiling mid-file. Both are recoverable; throwing the reply away is not.
+    parsed = repairJsonObject(text);
+    repaired = isPlainObject(parsed);
+  }
+  if (!isPlainObject(parsed)) {
+    return { summary: text.trim().slice(0, 2_000), actions: [], unparsed: true };
   }
   const objectValue = parsed as JsonObject;
   const actions: ActionRequest[] = [];
@@ -47,8 +62,16 @@ export function parseProposal(text: string): ParsedProposal {
   }
   return {
     thoughts: typeof objectValue.thoughts === 'string' ? objectValue.thoughts : undefined,
-    summary: typeof objectValue.summary === 'string' ? objectValue.summary : text.trim().slice(0, 2_000),
+    // A repaired reply often lost its trailing "summary" key, so fall back to
+    // describing what did survive rather than dumping raw JSON as the summary.
+    summary:
+      typeof objectValue.summary === 'string'
+        ? objectValue.summary
+        : repaired
+          ? `Reply was truncated; recovered ${actions.length} action(s).`
+          : text.trim().slice(0, 2_000),
     actions,
+    ...(repaired ? { repaired: true } : {}),
   };
 }
 

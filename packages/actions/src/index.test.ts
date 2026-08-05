@@ -87,3 +87,71 @@ test('agent tool allowlist restricts what an actor may call', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a reply cut off mid-file keeps every action that survived', () => {
+  // What a real run produced: the model was writing a Next.js scaffold, hit
+  // the output ceiling partway through the third file, and the reply ended in
+  // the middle of a string. Strict parsing returned nothing, the agent
+  // reported success, and the delivery was two marketing files.
+  const truncated = `{
+  "thoughts": "Scaffolding the app",
+  "summary": "Created the project skeleton",
+  "actions": [
+    { "tool": "fs.write", "input": { "path": "package.json", "content": "{}" }, "reason": "manifest" },
+    { "tool": "fs.write", "input": { "path": "app/layout.tsx", "content": "export default function L() {}" } },
+    { "tool": "fs.write", "input": { "path": "app/page.tsx", "content": "export default function P() { return <div>hel`;
+
+  const proposal = parseProposal(truncated);
+  assert.equal(proposal.unparsed, undefined, 'the reply is recovered, not discarded');
+  assert.equal(proposal.repaired, true);
+  assert.equal(proposal.actions.length, 2, 'both complete files survive; the half-written one is dropped');
+  assert.deepEqual(
+    proposal.actions.map((a) => a.input.path),
+    ['package.json', 'app/layout.tsx'],
+  );
+});
+
+test('raw newlines inside a file body do not destroy the whole reply', () => {
+  // Models emit source code inside a JSON string and do not always escape the
+  // newlines. One of them used to invalidate every other file in the reply.
+  const raw = `{"summary":"wrote a page","actions":[{"tool":"fs.write","input":{"path":"app/page.tsx","content":"export default function Page() {
+  return <h1>Cars</h1>;
+}"}}]}`;
+  const proposal = parseProposal(raw);
+  assert.equal(proposal.unparsed, undefined);
+  assert.equal(proposal.actions.length, 1);
+  assert.equal(proposal.actions[0]?.input.path, 'app/page.tsx');
+  assert.match(String(proposal.actions[0]?.input.content), /return <h1>Cars<\/h1>;/);
+  assert.match(String(proposal.actions[0]?.input.content), /\n/, 'the newline is preserved, not swallowed');
+});
+
+test('a reply with nothing usable is reported as unparsed, not as an empty success', () => {
+  const proposal = parseProposal('I will now create the files for you. Stand by!');
+  assert.equal(proposal.unparsed, true);
+  assert.deepEqual(proposal.actions, []);
+
+  const alsoBad = parseProposal('');
+  assert.equal(alsoBad.unparsed, true);
+});
+
+test('a well-formed reply is untouched and not marked repaired', () => {
+  const proposal = parseProposal(
+    '```json\n{"thoughts":"t","summary":"s","actions":[{"tool":"fs.write","input":{"path":"a.txt","content":"hi"},"reason":"r"}]}\n```',
+  );
+  assert.equal(proposal.repaired, undefined);
+  assert.equal(proposal.unparsed, undefined);
+  assert.equal(proposal.summary, 's');
+  assert.equal(proposal.actions[0]?.reason, 'r');
+});
+
+test('a repaired reply that lost its summary describes what survived', () => {
+  // The summary key is usually last, so truncation eats it. Pasting the raw
+  // JSON into the summary is what put `{ "thoughts": ...` in the report.
+  const proposal = parseProposal(
+    '{"thoughts":"t","actions":[{"tool":"fs.write","input":{"path":"a.txt","content":"hi"}},{"tool":"fs.write","input":{"path":"b.txt","con',
+  );
+  assert.equal(proposal.repaired, true);
+  assert.equal(proposal.actions.length, 1);
+  assert.match(proposal.summary, /truncated; recovered 1 action/);
+  assert.doesNotMatch(proposal.summary, /"thoughts"/, 'raw JSON never reaches the report');
+});

@@ -60,6 +60,8 @@ export interface SessionManagerOptions {
   bus?: EventBus;
   logger?: Logger;
   clock?: Clock;
+  /** Upper bound when a model card allows more than `maxTokens` (default 32k). */
+  maxOutputTokens?: number;
   /** Total time one completion may spend waiting out rate limits (default 120s). */
   rateLimitWaitMs?: number;
   /** How many times to retry the same provider after a 429 (default 4). */
@@ -98,6 +100,8 @@ export class AiSessionManager {
   private readonly chain: ProviderKind[];
   private readonly disabled: Set<ProviderKind>;
   private readonly maxTokens: number;
+  /** Ceiling on what a model card may raise maxTokens to. */
+  private readonly maxOutputTokens: number;
   private readonly cooldownMs: number;
   /** How long one completion may spend waiting out rate limits, in total. */
   private readonly rateLimitWaitMs: number;
@@ -121,6 +125,7 @@ export class AiSessionManager {
     this.chain = options.fallbackChain;
     this.disabled = new Set(options.disabledProviders ?? []);
     this.maxTokens = options.maxTokens ?? 16_000;
+    this.maxOutputTokens = options.maxOutputTokens ?? 32_000;
     this.cooldownMs = options.rateLimitCooldownMs ?? 60_000;
     this.rateLimitWaitMs = options.rateLimitWaitMs ?? 120_000;
     this.rateLimitRetries = options.rateLimitRetries ?? 4;
@@ -251,10 +256,17 @@ export class AiSessionManager {
       let spent = 0;
       for (let attempt = 0; ; attempt += 1) {
         try {
+          // Let a model use the room it actually has. Capping every reply at
+          // the global default truncates a scaffold mid-file, and a reply cut
+          // off there loses the files that came after it.
+          const card = model ? this.models.get(model) : undefined;
+          const ceiling = card?.maxOutputTokens
+            ? Math.max(this.maxTokens, Math.min(card.maxOutputTokens, this.maxOutputTokens))
+            : this.maxTokens;
           const response = await provider.complete({
             ...request,
             model,
-            maxTokens: request.maxTokens ?? this.maxTokens,
+            maxTokens: request.maxTokens ?? ceiling,
           });
           this.limits.recordTokens(kind, response.usage);
           this.recordUsage(response);
