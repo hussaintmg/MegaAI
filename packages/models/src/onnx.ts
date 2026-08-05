@@ -359,33 +359,47 @@ function readLabels(dir: string, name: string): LabelsFile | undefined {
   }
 }
 
+/** The first directory that holds a given model's labels file. */
+function findModelDir(dirs: readonly string[], name: string): { dir: string; labels: LabelsFile } | undefined {
+  for (const dir of dirs) {
+    const labels = readLabels(dir, name);
+    if (labels) return { dir, labels };
+  }
+  return undefined;
+}
+
 /**
- * Load whichever deep models are present in `dir` (typically
- * `.megaai/models/`). Everything is optional — a missing model, a missing
- * labels file or a missing onnxruntime simply yields `undefined` for it.
+ * Load whichever deep models are present, checking each directory in order —
+ * typically a machine-local `.megaai/models/` first, then the models shipped
+ * with the repository, so a fresh checkout (a CI runner, say) has working
+ * vision without anyone downloading anything.
+ *
+ * Everything is optional: a missing model, a missing labels file or a missing
+ * onnxruntime simply yields `undefined` for that entry.
  */
-export async function loadDeepModels(dir: string): Promise<DeepModels> {
+export async function loadDeepModels(dirs: string | readonly string[]): Promise<DeepModels> {
+  const candidates = typeof dirs === 'string' ? [dirs] : dirs;
   const out: DeepModels = {};
 
-  const detectorLabels = readLabels(dir, 'ui-detector');
-  if (detectorLabels) {
-    out.detector = await OnnxDetector.load(join(dir, 'ui-detector.onnx'), {
-      labels: detectorLabels.labels,
-      imgSize: detectorLabels.imgSize ?? 640,
+  const detector = findModelDir(candidates, 'ui-detector');
+  if (detector) {
+    out.detector = await OnnxDetector.load(join(detector.dir, 'ui-detector.onnx'), {
+      labels: detector.labels.labels,
+      imgSize: detector.labels.imgSize ?? 640,
     });
   }
-  const screenLabels = readLabels(dir, 'screen-classifier');
-  if (screenLabels) {
-    out.screenClassifier = await OnnxClassifier.load(join(dir, 'screen-classifier.onnx'), {
-      labels: screenLabels.labels,
-      imgSize: screenLabels.imgSize ?? 224,
+  const screen = findModelDir(candidates, 'screen-classifier');
+  if (screen) {
+    out.screenClassifier = await OnnxClassifier.load(join(screen.dir, 'screen-classifier.onnx'), {
+      labels: screen.labels.labels,
+      imgSize: screen.labels.imgSize ?? 224,
     });
   }
-  const defectLabels = readLabels(dir, 'ui-defect-detector');
-  if (defectLabels) {
-    out.defectDetector = await OnnxClassifier.load(join(dir, 'ui-defect-detector.onnx'), {
-      labels: defectLabels.labels,
-      imgSize: defectLabels.imgSize ?? 224,
+  const defect = findModelDir(candidates, 'ui-defect-detector');
+  if (defect) {
+    out.defectDetector = await OnnxClassifier.load(join(defect.dir, 'ui-defect-detector.onnx'), {
+      labels: defect.labels.labels,
+      imgSize: defect.labels.imgSize ?? 224,
     });
   }
   return out;

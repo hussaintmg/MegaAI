@@ -21,6 +21,8 @@ notebooks/*.zip
 /dataset/
 *.onnx
 *.pt
+# …except the shipped models, which every runner needs
+!models/*.onnx
 
 # env / secrets
 .env

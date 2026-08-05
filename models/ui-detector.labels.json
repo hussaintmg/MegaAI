@@ -1,0 +1,16 @@
+{
+  "labels": [
+    "button",
+    "input",
+    "link",
+    "checkbox",
+    "radio",
+    "select",
+    "textarea",
+    "image",
+    "heading",
+    "nav"
+  ],
+  "imgSize": 416,
+  "model": "yolo11n"
+}

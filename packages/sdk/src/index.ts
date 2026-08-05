@@ -270,9 +270,12 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   // Trained deep models (YOLO detector + classifiers) if their ONNX weights
   // are in .megaai/models/. Loaded lazily on first use so boot stays fast and
   // a missing onnxruntime never blocks startup.
+  // Machine-local weights win, then the ones shipped with the repository, so
+  // a fresh checkout (a CI runner) has working vision with no extra setup.
+  const modelDirs = [join(config.system.dataDir, 'models'), join(process.cwd(), 'models')];
   let deepModelsPromise: Promise<DeepModels> | undefined;
   const deep = (): Promise<DeepModels> => {
-    deepModelsPromise ??= loadDeepModels(join(config.system.dataDir, 'models')).catch((err) => {
+    deepModelsPromise ??= loadDeepModels(modelDirs).catch((err) => {
       logger.child('models').warn('deep models unavailable', { error: String(err) });
       return {} as DeepModels;
     });

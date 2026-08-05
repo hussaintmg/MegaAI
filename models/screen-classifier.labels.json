@@ -1,0 +1,17 @@
+{
+  "labels": [
+    "article",
+    "cart",
+    "checkout",
+    "contact-form",
+    "dashboard",
+    "error",
+    "login",
+    "product-list",
+    "settings",
+    "signup"
+  ],
+  "imgSize": 224,
+  "model": "yolo11n-cls.pt",
+  "accuracy": 0.9896551966667175
+}

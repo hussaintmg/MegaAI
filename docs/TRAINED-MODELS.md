@@ -75,13 +75,28 @@ correct there — box geometry has to survive the transform.
 
 ## Using them
 
+**Nothing to install — they ship in the repository.** The `.onnx` weights and
+their labels files live in `models/`, so a fresh checkout (a CI runner, a new
+machine) has working vision immediately.
+
+The SDK searches two directories in order:
+
+1. `.megaai/models/` — machine-local weights, which win if present
+2. `models/` — the ones committed to the repository
+
+To try your own weights, drop them into `.megaai/models/` and they take
+precedence:
+
 ```bash
 unzip megaai-onnx.zip -d .megaai/models
 ```
 
-The SDK loads whatever is present on first use. Nothing is required: with the
-weights absent, or `onnxruntime-node` not installed, everything falls back to
-the existing DOM-based path.
+Nothing is required: with the weights absent, or `onnxruntime-node` not
+installed, everything falls back to the existing DOM-based path.
+
+The classical models are cheap enough to rebuild rather than ship, so
+`megaai train` runs before every cloud goal (a couple of seconds) and writes
+them to `.megaai/models/`.
 
 ```ts
 const screen = await megaai.desktop.observe({ url }, { pixels: true });

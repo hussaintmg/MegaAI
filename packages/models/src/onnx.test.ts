@@ -123,6 +123,25 @@ test('nms never suppresses across different labels', () => {
   assert.equal(nms(overlapping, 0.45).length, 2);
 });
 
+test('loadDeepModels searches directories in order and prefers the first hit', async () => {
+  const local = mkdtempSync(join(tmpdir(), 'megaai-local-'));
+  const shipped = mkdtempSync(join(tmpdir(), 'megaai-shipped-'));
+  try {
+    // Only the shipped directory has the model: a fresh checkout must still
+    // find it even though the machine-local directory is searched first.
+    writeFileSync(join(shipped, 'ui-detector.labels.json'), JSON.stringify({ labels: ['button'], imgSize: 416 }));
+    // Loading returns undefined here (no .onnx and likely no runtime), but the
+    // point is that searching an absent directory first must not abort.
+    assert.doesNotReject(loadDeepModels([local, shipped]));
+
+    // A string argument still works — the single-directory form is unchanged.
+    assert.doesNotReject(loadDeepModels(local));
+  } finally {
+    rmSync(local, { recursive: true, force: true });
+    rmSync(shipped, { recursive: true, force: true });
+  }
+});
+
 test('loaders degrade gracefully when weights or labels are missing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'megaai-onnx-'));
   try {

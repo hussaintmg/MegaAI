@@ -1,0 +1,14 @@
+{
+  "labels": [
+    "broken-image",
+    "clean",
+    "cutoff",
+    "low-contrast",
+    "overflow",
+    "overlap",
+    "tiny-text"
+  ],
+  "imgSize": 224,
+  "model": "yolo11n-cls.pt",
+  "accuracy": 0.8837209343910217
+}
