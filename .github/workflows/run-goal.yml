@@ -31,6 +31,14 @@ jobs:
         run: npm ci
       - name: Build the engine
         run: npm run build
+      # The trained vision models need onnxruntime-node. It is an optional
+      # dependency, so `npm ci` skips it in silence when its native binary
+      # cannot be fetched — and the audits then quietly fall back to DOM-only
+      # analysis. Retry it here, and let the run continue either way; the
+      # executor reports which happened as a `vision` event on the goal.
+      - name: Enable the trained vision models
+        continue-on-error: true
+        run: npm install onnxruntime-node --no-save --no-audit --no-fund
       # Cheap (a couple of seconds) and deterministic, so the UI-purpose,
       # lead-scoring and error-triage models are always present and fresh.
       # The deep vision weights ship in models/ and need no step.

@@ -37,9 +37,10 @@ import { WorkflowEngine } from '@megaai/workflow';
 import { createCommandRunner, createToolRegistry, ToolRegistry } from '@megaai/tools';
 import { createGitTools, GitEngine } from '@megaai/code';
 import { BrowserEngine, createBrowserTools } from '@megaai/browser';
-import { createVisionTools, VisionTester } from '@megaai/vision';
+import { createAppPreviewTool, createVisionTools, VisionTester } from '@megaai/vision';
 import {
   createModelTools,
+  defaultModelDirs,
   loadDeepModels,
   loadRegistry,
   ModelRegistry as ModelPackRegistry,
@@ -256,23 +257,12 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   // heuristic; lead-scoring and error-triage are reachable via `model.predict`.
   const models = loadRegistry(join(config.system.dataDir, 'models')) ?? new ModelPackRegistry();
   const uiModel = models.ui();
-  // Vision/UI testing: static analysis always; real headless Chromium when
-  // the browser is allowed (and playwright-core + Chromium are present).
-  const vision = new VisionTester({
-    preferBrowser: config.security.allowBrowser,
-    classifier: uiModel ? uiModel.asClassifier() : undefined,
-    logger: (message, fields) => logger.child('vision').info(message, fields),
-  });
-  for (const tool of createVisionTools(vision)) tools.register(tool);
-  for (const tool of createModelTools(models)) tools.register(tool);
-  // Desktop/UI automation: browser-backed screen perception (element detection
-  // + purpose, sharing the trained UI-purpose model) plus real mouse/keyboard.
   // Trained deep models (YOLO detector + classifiers) if their ONNX weights
   // are in .megaai/models/. Loaded lazily on first use so boot stays fast and
   // a missing onnxruntime never blocks startup.
   // Machine-local weights win, then the ones shipped with the repository, so
   // a fresh checkout (a CI runner) has working vision with no extra setup.
-  const modelDirs = [join(config.system.dataDir, 'models'), join(process.cwd(), 'models')];
+  const modelDirs = defaultModelDirs(config.system.dataDir);
   let deepModelsPromise: Promise<DeepModels> | undefined;
   const deep = (): Promise<DeepModels> => {
     deepModelsPromise ??= loadDeepModels(modelDirs).catch((err) => {
@@ -282,6 +272,43 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     return deepModelsPromise;
   };
 
+  // Vision/UI testing: static analysis always; real headless Chromium when
+  // the browser is allowed (and playwright-core + Chromium are present). The
+  // deep models turn the audit from "is this markup sound" into "does the
+  // rendered page look right", which is the question that actually matters.
+  const vision = new VisionTester({
+    preferBrowser: config.security.allowBrowser,
+    classifier: uiModel ? uiModel.asClassifier() : undefined,
+    inspector: async (png) => {
+      const { detector, screenClassifier, defectDetector, unavailable } = await deep();
+      // Say it out loud. A vision report that quietly omits the trained models
+      // reads exactly like one where they ran and found nothing.
+      if (unavailable) return { note: `trained vision models not running: ${unavailable}` };
+      if (!detector && !screenClassifier && !defectDetector) return undefined;
+      const [screen, defect, boxes] = await Promise.all([
+        screenClassifier?.classify(png).catch(() => undefined),
+        defectDetector?.classify(png).catch(() => undefined),
+        detector?.detect(png).catch(() => undefined),
+      ]);
+      return {
+        ...(screen ? { screenKind: screen.label, screenConfidence: screen.confidence } : {}),
+        ...(defect ? { defect: defect.label, defectConfidence: defect.confidence } : {}),
+        ...(boxes ? { elementsDetected: boxes.length } : {}),
+      };
+    },
+    logger: (message, fields) => logger.child('vision').info(message, fields),
+  });
+  for (const tool of createVisionTools(vision)) tools.register(tool);
+  // app.preview — install, build, start and photograph the real app. Needs the
+  // shell, so it registers only when the shell is allowed.
+  if (config.security.allowShell) {
+    tools.register(
+      createAppPreviewTool({ enabled: true, allowlist: config.security.shellAllowlist }, vision),
+    );
+  }
+  for (const tool of createModelTools(models)) tools.register(tool);
+  // Desktop/UI automation: browser-backed screen perception (element detection
+  // + purpose, sharing the trained UI-purpose model) plus real mouse/keyboard.
   const desktop = new DesktopEngine({
     classifier: uiModel ? uiModel.asClassifier() : undefined,
     allowedHosts: config.security.browserAllowedHosts,

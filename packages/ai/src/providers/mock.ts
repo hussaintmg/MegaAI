@@ -37,7 +37,156 @@ interface FilePlan {
   content: string;
 }
 
+/** What the scaffolded app renders — used by the audit/observe simulations. */
+const MOCK_RENDERED_PAGE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>MegaAI app</title></head>
+<body>
+<header class="site-header"><nav><a href="/">Home</a> <a href="/about">About</a> <a href="/contact">Contact</a></nav></header>
+<main class="container">
+  <section class="hero"><h1>MegaAI app</h1><p>Served by this app's own API routes.</p></section>
+  <section class="grid">
+    <article class="card"><h2>Fast</h2><p>Server-rendered pages.</p></article>
+    <article class="card"><h2>Typed</h2><p>Every data shape is declared.</p></article>
+  </section>
+  <form><label for="email">Email</label><input id="email" name="email" type="email" /><button type="submit">Subscribe</button></form>
+</main>
+<footer class="site-footer">Built by MegaAI.</footer>
+</body>
+</html>`;
+
+/**
+ * A Next.js App Router skeleton the mock emits for UI work.
+ *
+ * The simulator has to produce what the real stack contract asks for, or the
+ * offline path stops representing the online one — which is exactly how a
+ * "website" delivery came out as one `public/index.html` for so long.
+ */
+function nextjsFilesFor(title: string, goal: string): FilePlan[] {
+  const t = title.toLowerCase();
+  const name = slugify(goal) || 'megaai-app';
+
+  if (t.includes('scaffold')) {
+    return [
+      {
+        path: 'package.json',
+        content: `${JSON.stringify(
+          {
+            name,
+            version: '0.1.0',
+            private: true,
+            scripts: { dev: 'next dev', build: 'next build', start: 'next start' },
+            dependencies: { next: '^15.1.0', react: '^19.0.0', 'react-dom': '^19.0.0' },
+            devDependencies: { '@types/node': '^22.10.0', '@types/react': '^19.0.0', typescript: '^5.7.0' },
+          },
+          null,
+          2,
+        )}\n`,
+      },
+      { path: 'next.config.mjs', content: `/** @type {import('next').NextConfig} */\nconst nextConfig = { reactStrictMode: true };\nexport default nextConfig;\n` },
+      { path: '.gitignore', content: `node_modules/\n.next/\nout/\n.env*.local\nnext-env.d.ts\n` },
+      {
+        path: 'tsconfig.json',
+        content: `${JSON.stringify(
+          {
+            compilerOptions: {
+              target: 'ES2022',
+              lib: ['dom', 'dom.iterable', 'esnext'],
+              strict: true,
+              noEmit: true,
+              esModuleInterop: true,
+              module: 'esnext',
+              moduleResolution: 'bundler',
+              resolveJsonModule: true,
+              isolatedModules: true,
+              jsx: 'preserve',
+              incremental: true,
+              plugins: [{ name: 'next' }],
+              paths: { '@/*': ['./*'] },
+            },
+            include: ['next-env.d.ts', '**/*.ts', '**/*.tsx', '.next/types/**/*.ts'],
+            exclude: ['node_modules'],
+          },
+          null,
+          2,
+        )}\n`,
+      },
+      {
+        path: 'app/layout.tsx',
+        content: `import type { Metadata } from 'next';\nimport './globals.css';\nimport { SiteHeader } from '@/components/SiteHeader';\nimport { SiteFooter } from '@/components/SiteFooter';\n\nexport const metadata: Metadata = {\n  title: '${goal.replace(/'/g, "\\'")}',\n  description: 'Built by MegaAI.',\n};\n\nexport default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html lang="en">\n      <body>\n        <SiteHeader />\n        <main className="container">{children}</main>\n        <SiteFooter />\n      </body>\n    </html>\n  );\n}\n`,
+      },
+      {
+        path: 'app/page.tsx',
+        content: `import { Hero } from '@/components/Hero';\nimport { FeatureGrid } from '@/components/FeatureGrid';\nimport { getFeatures } from '@/lib/data';\n\nexport default async function HomePage() {\n  const features = await getFeatures();\n  return (\n    <>\n      <Hero title="${goal.replace(/"/g, '&quot;')}" />\n      <FeatureGrid features={features} />\n    </>\n  );\n}\n`,
+      },
+      { path: 'lib/types.ts', content: `export interface Feature {\n  id: string;\n  title: string;\n  body: string;\n}\n` },
+      // Without this Next serves no favicon and every page load logs a 404 —
+      // a real defect the audit reports, so the scaffold ships one.
+      {
+        path: 'app/icon.svg',
+        content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#5b8cff"/><text x="16" y="22" font-family="system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>\n`,
+      },
+    ];
+  }
+
+  if (t.includes('design system') || t.includes('layout') || t.includes('app shell')) {
+    return [
+      {
+        path: 'app/globals.css',
+        content: `:root {\n  --bg: #0b0e14;\n  --panel: #131722;\n  --text: #e6e9f0;\n  --muted: #8b94a7;\n  --accent: #5b8cff;\n  --space: 1rem;\n}\n* { box-sizing: border-box; }\nhtml, body { margin: 0; padding: 0; }\nbody {\n  background: var(--bg);\n  color: var(--text);\n  font: 16px/1.6 ui-sans-serif, system-ui, sans-serif;\n}\n.container { max-width: 68rem; margin: 0 auto; padding: calc(var(--space) * 2) var(--space); }\n.site-header, .site-footer { padding: var(--space); border-bottom: 1px solid #232838; }\n.site-footer { border-bottom: 0; border-top: 1px solid #232838; color: var(--muted); }\n.hero h1 { font-size: clamp(1.8rem, 5vw, 3rem); margin: 0 0 var(--space); }\n.grid { display: grid; gap: var(--space); grid-template-columns: 1fr; }\n@media (min-width: 720px) { .grid { grid-template-columns: repeat(3, 1fr); } }\n.card { background: var(--panel); border-radius: 12px; padding: var(--space); }\n`,
+      },
+      {
+        path: 'components/SiteHeader.tsx',
+        content: `import Link from 'next/link';\n\nexport function SiteHeader() {\n  return (\n    <header className="site-header">\n      <nav>\n        <Link href="/">Home</Link> · <Link href="/about">About</Link> · <Link href="/contact">Contact</Link>\n      </nav>\n    </header>\n  );\n}\n`,
+      },
+      {
+        path: 'components/SiteFooter.tsx',
+        content: `export function SiteFooter() {\n  return <footer className="site-footer">Built by MegaAI.</footer>;\n}\n`,
+      },
+    ];
+  }
+
+  if (t.includes('home page') || t.includes('storefront') || t.includes('pages')) {
+    return [
+      {
+        path: 'components/Hero.tsx',
+        content: `export function Hero({ title }: { title: string }) {\n  return (\n    <section className="hero">\n      <h1>{title}</h1>\n      <p>Everything below is served by this app&apos;s own API routes.</p>\n    </section>\n  );\n}\n`,
+      },
+      {
+        path: 'components/FeatureGrid.tsx',
+        content: `import type { Feature } from '@/lib/types';\n\nexport function FeatureGrid({ features }: { features: Feature[] }) {\n  return (\n    <section className="grid">\n      {features.map((feature) => (\n        <article key={feature.id} className="card">\n          <h2>{feature.title}</h2>\n          <p>{feature.body}</p>\n        </article>\n      ))}\n    </section>\n  );\n}\n`,
+      },
+      {
+        path: 'app/about/page.tsx',
+        content: `export default function AboutPage() {\n  return (\n    <section>\n      <h1>About</h1>\n      <p>What this project is and who it is for.</p>\n    </section>\n  );\n}\n`,
+      },
+      {
+        path: 'app/contact/page.tsx',
+        content: `export default function ContactPage() {\n  return (\n    <section>\n      <h1>Contact</h1>\n      <p>Reach the team at hello@example.com.</p>\n    </section>\n  );\n}\n`,
+      },
+    ];
+  }
+
+  // API + data layer, and the fallback for any other coding task.
+  return [
+    {
+      path: 'lib/data.ts',
+      content: `import type { Feature } from './types';\n\nconst FEATURES: Feature[] = [\n  { id: 'a', title: 'Fast', body: 'Server-rendered pages with no client waterfall.' },\n  { id: 'b', title: 'Typed', body: 'Every data shape is declared in lib/types.ts.' },\n  { id: 'c', title: 'Tested', body: 'The data layer and the API routes both have tests.' },\n];\n\nexport async function getFeatures(): Promise<Feature[]> {\n  return FEATURES;\n}\n\nexport async function getFeature(id: string): Promise<Feature | undefined> {\n  return FEATURES.find((feature) => feature.id === id);\n}\n`,
+    },
+    {
+      path: 'app/api/features/route.ts',
+      content: `import { getFeatures } from '@/lib/data';\n\nexport async function GET() {\n  return Response.json({ features: await getFeatures() });\n}\n`,
+    },
+  ];
+}
+
 function codeFilesFor(title: string, description: string): FilePlan[] {
+  // The stack contract travels in the task description, so the simulator can
+  // honour the same layout the real agents are given.
+  if (description.includes('Next.js 15 App Router')) {
+    const goalLine = /Create the project skeleton for: (.+)/.exec(description)?.[1];
+    return nextjsFilesFor(title, (goalLine ?? title).trim());
+  }
   const text = `${title} ${description}`.toLowerCase();
   const slug = slugify(title);
   const has = (...words: string[]) => words.some((word) => text.includes(word));
@@ -252,12 +401,18 @@ function replyForTask(meta: JsonObject, request: CompletionRequest): JsonObject 
       break;
     }
     case 'vision-testing': {
-      actions.push({ tool: 'vision.audit', input: { file: 'public/index.html' }, reason: title });
-      summary = `Ran visual + responsive testing on the built UI for "${title}".`;
+      // The simulator has no model to write an app with and no minutes to
+      // spend installing one, so it audits a representative snapshot rather
+      // than claiming to have run `app.preview` against a real server. A real
+      // provider follows the task description and starts the actual app.
+      actions.push({ tool: 'vision.audit', input: { html: MOCK_RENDERED_PAGE, label: 'simulated render' }, reason: title });
+      summary =
+        `Audited a simulated render for "${title}" — responsiveness, console errors, accessibility. ` +
+        `The offline mock cannot install and start the real app; run this with a real provider for app.preview.`;
       break;
     }
     case 'desktop': {
-      actions.push({ tool: 'desktop.observe', input: { file: 'public/index.html' }, reason: title });
+      actions.push({ tool: 'desktop.observe', input: { html: MOCK_RENDERED_PAGE }, reason: title });
       summary = `Observed the UI and identified its interactive elements for "${title}".`;
       break;
     }

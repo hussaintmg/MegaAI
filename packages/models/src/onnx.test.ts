@@ -145,11 +145,20 @@ test('loadDeepModels searches directories in order and prefers the first hit', a
 test('loaders degrade gracefully when weights or labels are missing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'megaai-onnx-'));
   try {
-    // Nothing on disk at all.
-    assert.deepEqual(await loadDeepModels(dir), {});
-    // A labels file with no matching .onnx must not throw either.
+    // Nothing on disk at all: no models, and a stated reason. A silently empty
+    // result let every vision report read as though the models had run and
+    // found nothing, for as long as nobody went looking.
+    const empty = await loadDeepModels(dir);
+    assert.equal(empty.detector, undefined);
+    assert.match(empty.unavailable ?? '', /no model weights found in:/);
+    assert.ok(empty.unavailable?.includes(dir), 'the reason names the directories that were searched');
+
+    // A labels file with no matching .onnx must not throw either — and the
+    // reason changes, because now the weights are the thing that is missing.
     writeFileSync(join(dir, 'ui-detector.labels.json'), JSON.stringify({ labels: ['button'], imgSize: 640 }));
-    assert.equal((await loadDeepModels(dir)).detector, undefined);
+    const halfThere = await loadDeepModels(dir);
+    assert.equal(halfThere.detector, undefined);
+    assert.doesNotMatch(halfThere.unavailable ?? '', /no model weights found/);
     // Direct loads of absent files are undefined, not exceptions.
     assert.equal(await OnnxDetector.load(join(dir, 'missing.onnx'), { labels: ['button'] }), undefined);
     assert.equal(await OnnxClassifier.load(join(dir, 'missing.onnx'), { labels: ['login'] }), undefined);

@@ -11,8 +11,9 @@
  * Env: PLATFORM_URL, EXECUTOR_TOKEN, GOAL_ID
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { collectContents, walkFiles } from './collect.mjs';
 import process from 'node:process';
 
 const PLATFORM_URL = (process.env.PLATFORM_URL ?? '').replace(/\/+$/, '');
@@ -55,68 +56,6 @@ async function postFinal(payload) {
     body: JSON.stringify({ type: 'final', ...payload }),
   });
   if (!res.ok) console.error(`executor: final post failed (HTTP ${res.status})`);
-}
-
-function walkFiles(dir, base = dir, out = []) {
-  for (const entry of readdirSync(dir)) {
-    if (entry === '.git' || entry === 'node_modules') continue;
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walkFiles(full, base, out);
-    else out.push(relative(base, full));
-    if (out.length >= 300) return out;
-  }
-  return out.sort();
-}
-
-// The delivery itself, not just its table of contents. Without this the only
-// copy of the work lives inside the Actions artifact zip and the dashboard can
-// show nothing but filenames.
-const MAX_FILE_BYTES = 128 * 1024;
-const MAX_TOTAL_BYTES = 1_200 * 1024;
-
-function isProbablyText(buffer) {
-  // A NUL in the first few KB means binary in every text format we emit.
-  const window = buffer.subarray(0, 4096);
-  return !window.includes(0);
-}
-
-/** Read the delivered files back as text, smallest first, within the caps. */
-function collectContents(root, paths) {
-  const sized = [];
-  for (const path of paths) {
-    try {
-      sized.push({ path, bytes: statSync(join(root, path)).size });
-    } catch {
-      // Vanished between the walk and now — nothing to send.
-    }
-  }
-  // Smallest first, so a cap spends its budget on the most files rather than
-  // on one big one. Source files are small; a stray asset should not crowd out
-  // the index.html the user is actually looking for.
-  sized.sort((a, b) => a.bytes - b.bytes);
-
-  const contents = [];
-  let total = 0;
-  for (const { path, bytes } of sized) {
-    if (total >= MAX_TOTAL_BYTES) break;
-    let buffer;
-    try {
-      buffer = readFileSync(join(root, path));
-    } catch {
-      continue;
-    }
-    if (!isProbablyText(buffer)) {
-      contents.push({ path, bytes, binary: true });
-      continue;
-    }
-    const room = Math.min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - total);
-    const truncated = buffer.length > room;
-    const text = buffer.subarray(0, room).toString('utf8');
-    total += Buffer.byteLength(text, 'utf8');
-    contents.push({ path, bytes, text, ...(truncated ? { truncated: true } : {}) });
-  }
-  contents.sort((a, b) => a.path.localeCompare(b.path));
-  return contents;
 }
 
 async function main() {
@@ -184,6 +123,25 @@ async function main() {
       : 'No AI provider is configured — add an API key in Settings. This run can only produce placeholder scaffolding.';
   console.log(`executor: ${providerLine}`);
   await postEvent('providers', providerLine);
+
+  // Say whether the trained vision models are actually running. onnxruntime is
+  // an optional dependency, so a failed download of its native binary is
+  // skipped in silence — and every audit then quietly falls back to the DOM.
+  try {
+    const modelsUrl = new URL('../../packages/models/dist/index.js', import.meta.url).href;
+    const { defaultModelDirs, loadDeepModels } = await import(modelsUrl);
+    // The same directory list the SDK will search, so "ready" here means the
+    // audits will really find them.
+    const models = await loadDeepModels(defaultModelDirs());
+    const loaded = ['detector', 'screenClassifier', 'defectDetector'].filter((key) => models[key]);
+    const visionLine = models.unavailable
+      ? `Trained vision models are NOT running: ${models.unavailable}`
+      : `Vision models ready: ${loaded.join(', ')}`;
+    console.log(`executor: ${visionLine}`);
+    await postEvent('vision', visionLine);
+  } catch (err) {
+    await postEvent('vision', `Could not check the vision models: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   megaai.bus.on(Events.TaskUpdated, (event) => {
     const task = event.payload?.task;

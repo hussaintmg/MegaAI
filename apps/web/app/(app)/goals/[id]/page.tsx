@@ -83,6 +83,8 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
 
   const current = contents.find((f) => f.path === selected);
   const previewable = Boolean(current && isHtml(current.path) && current.text);
+  // Screenshots app.preview took of the app while it was actually running.
+  const shots = useMemo(() => contents.filter((f) => f.image), [contents]);
 
   async function retry() {
     setRetrying(true);
@@ -166,6 +168,25 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
+      {shots.length > 0 && (
+        <div className="panel">
+          <h2>The running app</h2>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+            Captured by <code>app.preview</code>: the delivery was installed, built, started, and each route loaded in
+            a real browser.
+          </div>
+          <div className="shots">
+            {shots.map((shot) => (
+              <figure key={shot.path}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- a data: URL, not a remote asset */}
+                <img src={shot.image} alt={`Screenshot of ${shot.path}`} />
+                <figcaption>{shot.path.replace('.megaai/preview/', '')}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="panel">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
           <h2 style={{ margin: 0 }}>Delivery{contents.length > 0 && ` · ${contents.length} files`}</h2>
@@ -212,7 +233,10 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
                   </button>
                 )}
               </div>
-              {current?.binary ? (
+              {current?.image ? (
+                // eslint-disable-next-line @next/next/no-img-element -- a data: URL, not a remote asset
+                <img src={current.image} alt={current.path} style={{ display: 'block', width: '100%' }} />
+              ) : current?.binary ? (
                 <pre className="muted">Binary file — download the .zip to open it.</pre>
               ) : previewable && mode === 'preview' ? (
                 // No allow-same-origin: model-written scripts run in an opaque

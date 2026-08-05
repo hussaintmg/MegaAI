@@ -13,6 +13,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MegaError } from '@megaai/types';
 
 /* ------------------------------------------------------------------ *
@@ -341,6 +342,14 @@ export interface DeepModels {
   detector?: OnnxDetector;
   screenClassifier?: OnnxClassifier;
   defectDetector?: OnnxClassifier;
+  /**
+   * Why nothing loaded, when nothing did.
+   *
+   * Every failure here is designed to be non-fatal, which is right — but a
+   * silent one means the trained models can be missing for months while every
+   * report still reads as though they ran. Callers surface this.
+   */
+  unavailable?: string;
 }
 
 interface LabelsFile {
@@ -402,5 +411,47 @@ export async function loadDeepModels(dirs: string | readonly string[]): Promise<
       imgSize: defect.labels.imgSize ?? 224,
     });
   }
+
+  if (!out.detector && !out.screenClassifier && !out.defectDetector) {
+    out.unavailable = await explainMissing(candidates, Boolean(detector ?? screen ?? defect));
+  }
   return out;
+}
+
+/**
+ * Where the weights are looked for, in order: machine-local first, then the
+ * ones committed to the repository.
+ *
+ * Resolved from this module's own location rather than the working directory,
+ * because the executor and the SDK run from different places — and when the
+ * two disagree, one of them reports the models as ready while the other
+ * silently finds nothing.
+ */
+export function defaultModelDirs(dataDir?: string): string[] {
+  const packaged = fileURLToPath(new URL('../../../models', import.meta.url));
+  const dirs = dataDir ? [join(dataDir, 'models')] : [];
+  dirs.push(join(process.cwd(), '.megaai', 'models'), join(process.cwd(), 'models'), packaged);
+  return [...new Set(dirs)];
+}
+
+/** True when an optional dependency actually resolves at runtime. */
+async function hasModule(name: string): Promise<boolean> {
+  try {
+    await import(name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function explainMissing(candidates: readonly string[], weightsFound: boolean): Promise<string> {
+  if (!weightsFound) return `no model weights found in: ${candidates.join(', ')}`;
+  if (!(await loadOrt())) {
+    return (
+      'onnxruntime-node is not installed — it is an optional dependency, so a failed download of ' +
+      'its native binary is skipped silently. Run: npm install onnxruntime-node'
+    );
+  }
+  if (!(await hasModule('pngjs'))) return 'pngjs is not installed — screenshots cannot be decoded';
+  return 'the weights are present but onnxruntime could not create a session from them';
 }

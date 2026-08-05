@@ -49,6 +49,10 @@ export function buildSystemPrompt(parts: SystemPromptParts): string {
   const constraints = [
     'Stay strictly within the current task; do not invent extra scope.',
     'Prefer small, verifiable steps over sweeping changes.',
+    // Two failure modes seen in real deliveries: skeleton files passed off as
+    // finished work, and a summary claiming success for a step that never ran.
+    'Everything you deliver must be finished: no TODOs, stubs, placeholder copy or lorem ipsum.',
+    'Your summary must match what actually happened — if a command failed or you skipped a step, say so.',
     ...(parts.constraints ?? []),
   ];
   sections.push(`## Constraints\n${constraints.map((c) => `- ${c}`).join('\n')}`);

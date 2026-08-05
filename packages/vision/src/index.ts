@@ -64,6 +64,37 @@ export interface ResponsiveResult {
   note?: string;
 }
 
+/**
+ * What the trained models saw in the pixels, independent of the DOM.
+ *
+ * The DOM checks answer "is the markup sound"; this answers "does the rendered
+ * page look right" — which is the question a person actually asks, and the one
+ * a page can fail while its HTML is perfectly valid.
+ */
+export interface VisualFinding {
+  /** The kind of screen the classifier recognised (login, checkout, article…). */
+  screenKind?: string;
+  screenConfidence?: number;
+  /** The visual defect detector's verdict: clean, overflow, overlap, cutoff… */
+  defect?: string;
+  defectConfidence?: number;
+  /** How many UI elements the detector found from pixels alone. */
+  elementsDetected?: number;
+  note?: string;
+}
+
+/** Inspect a PNG with the trained models. Undefined when none are loaded. */
+export type VisualInspector = (png: Buffer) => Promise<VisualFinding | undefined>;
+
+/** A request the page made that did not come back. */
+export interface FailedRequest {
+  url: string;
+  status?: number;
+  resourceType?: string;
+  /** Blocking assets break the page; a missing icon does not. */
+  severity: 'warn' | 'error';
+}
+
 export interface AuditReport {
   target: string;
   driver: 'static' | 'browser';
@@ -71,9 +102,11 @@ export interface AuditReport {
   passed: boolean;
   responsive: ResponsiveResult[];
   console: { errors: string[]; warnings: string[] };
+  network: FailedRequest[];
   accessibility: AuditIssue[];
   performance: { loadMs?: number; domContentLoadedMs?: number; resources?: number; note?: string };
   elements: UiElement[];
+  visual?: VisualFinding;
 }
 
 export interface AuditInput {
@@ -118,11 +151,13 @@ function scoreReport(report: Omit<AuditReport, 'score' | 'passed'>): { score: nu
   let score = 100;
   score -= report.console.errors.length * 8;
   score -= report.console.warnings.length * 2;
+  for (const failure of report.network) score -= failure.severity === 'error' ? 8 : 3;
   for (const issue of report.accessibility) score -= issue.severity === 'error' ? 6 : issue.severity === 'warn' ? 3 : 1;
   score -= report.responsive.filter((r) => r.overflow).length * 10;
   score = Math.max(0, Math.min(100, Math.round(score)));
   const hasBlockingIssue =
     report.console.errors.length > 0 ||
+    report.network.some((f) => f.severity === 'error') ||
     report.accessibility.some((i) => i.severity === 'error') ||
     report.responsive.some((r) => r.overflow);
   return { score, passed: score >= 70 && !hasBlockingIssue };
@@ -214,7 +249,7 @@ export class StaticTestDriver {
       note: 'static estimate (runtime timing needs the browser driver)',
     };
 
-    const base = { target, driver: 'static' as const, responsive, console: { errors: [], warnings: [] }, accessibility, performance, elements };
+    const base = { target, driver: 'static' as const, responsive, console: { errors: [], warnings: [] }, network: [], accessibility, performance, elements };
     return { ...base, ...scoreReport(base) };
   }
 }
@@ -275,9 +310,28 @@ const PAGE_PERF = `(() => {
   };
 })()`;
 
+/**
+ * A defect the models are confident about is worth reporting; below this the
+ * classifier is guessing and would only add noise to an otherwise clean audit.
+ */
+const DEFECT_REPORT_THRESHOLD = 0.6;
+
+/** Severity for each defect class — some break the page, some are cosmetic. */
+const DEFECT_SEVERITY: Record<string, AuditIssue['severity']> = {
+  overflow: 'error',
+  cutoff: 'error',
+  overlap: 'error',
+  'broken-image': 'warn',
+  'tiny-text': 'warn',
+  'low-contrast': 'warn',
+};
+
 export class BrowserTestDriver {
   readonly name = 'browser';
-  constructor(private readonly classify: PurposeClassifier = classifyPurposeHeuristic) {}
+  constructor(
+    private readonly classify: PurposeClassifier = classifyPurposeHeuristic,
+    private readonly inspect?: VisualInspector,
+  ) {}
 
   private async withPage<T>(input: AuditInput, fn: (page: PwPage) => Promise<T>): Promise<T> {
     const browser = await launchChromium();
@@ -291,13 +345,48 @@ export class BrowserTestDriver {
     }
   }
 
-  private async load(page: PwPage, input: AuditInput, errors: string[], warnings: string[]): Promise<void> {
+  private async load(
+    page: PwPage,
+    input: AuditInput,
+    errors: string[],
+    warnings: string[],
+    network: FailedRequest[] = [],
+  ): Promise<void> {
     page.on('console', (msg) => {
       const m = msg as { type(): string; text(): string };
-      if (m.type() === 'error') errors.push(m.text().slice(0, 500));
-      else if (m.type() === 'warning') warnings.push(m.text().slice(0, 500));
+      const text = m.text().slice(0, 500);
+      // Chromium logs a bare "Failed to load resource: … 404" with no URL,
+      // which tells a reader nothing. The response listener below records the
+      // same failure with its URL and type, so drop the useless twin.
+      if (/^Failed to load resource:/i.test(text)) return;
+      if (m.type() === 'error') errors.push(text);
+      else if (m.type() === 'warning') warnings.push(text);
     });
     page.on('pageerror', (err) => errors.push(String(err).slice(0, 500)));
+    page.on('response', (res) => {
+      const r = res as { status(): number; url(): string; request(): { resourceType(): string } };
+      const status = r.status();
+      if (status < 400) return;
+      const type = r.request().resourceType();
+      network.push({
+        url: r.url().slice(0, 300),
+        status,
+        resourceType: type,
+        // A missing favicon or decorative image is untidy; a missing script,
+        // stylesheet or document means the page is not what was designed.
+        severity: type === 'image' || type === 'other' || type === 'font' ? 'warn' : 'error',
+      });
+    });
+    page.on('requestfailed', (req) => {
+      const r = req as { url(): string; resourceType(): string; failure(): { errorText: string } | null };
+      network.push({
+        url: r.url().slice(0, 300),
+        resourceType: r.resourceType(),
+        severity: r.resourceType() === 'image' || r.resourceType() === 'font' ? 'warn' : 'error',
+      });
+      const reason = r.failure()?.errorText;
+      if (reason) warnings.push(`request failed (${reason}): ${r.url().slice(0, 200)}`);
+    });
     if (input.url) await page.goto(input.url, { waitUntil: 'load', timeout: 20_000 });
     else await page.setContent(input.html ?? '', { waitUntil: 'load' });
   }
@@ -306,7 +395,8 @@ export class BrowserTestDriver {
     return this.withPage(input, async (page) => {
       const errors: string[] = [];
       const warnings: string[] = [];
-      await this.load(page, input, errors, warnings);
+      const network: FailedRequest[] = [];
+      await this.load(page, input, errors, warnings, network);
 
       const responsive: ResponsiveResult[] = [];
       for (const vp of VIEWPORTS) {
@@ -321,14 +411,38 @@ export class BrowserTestDriver {
       const rawElements = await page.evaluate<Array<ElementFeatures & { box?: UiElement['box'] }>>(PAGE_SCAN);
       const elements: UiElement[] = rawElements.map((e) => ({ ...e, purpose: this.classify(e) }));
 
+      // Look at the rendered pixels. The trained models were fitted on
+      // viewport-sized screenshots, so this is deliberately not fullPage.
+      let visual: VisualFinding | undefined;
+      if (this.inspect) {
+        try {
+          const shot = await page.screenshot({ type: 'png' });
+          visual = await this.inspect(shot);
+        } catch {
+          visual = { note: 'visual inspection failed' };
+        }
+        if (visual?.defect && visual.defect !== 'clean' && (visual.defectConfidence ?? 0) >= DEFECT_REPORT_THRESHOLD) {
+          accessibility.push({
+            rule: `visual-${visual.defect}`,
+            severity: DEFECT_SEVERITY[visual.defect] ?? 'warn',
+            detail: `the trained defect detector sees "${visual.defect}" in the rendered page (${Math.round((visual.defectConfidence ?? 0) * 100)}% confident)`,
+          });
+        }
+      }
+
       const base = {
         target: input.label ?? input.url ?? 'inline html',
         driver: 'browser' as const,
         responsive,
         console: { errors, warnings },
+        // Same asset can fail on several viewport passes; report each once.
+        network: network.filter(
+          (failure, i) => network.findIndex((other) => other.url === failure.url) === i,
+        ),
         accessibility,
         performance,
         elements,
+        ...(visual ? { visual } : {}),
       };
       return { ...base, ...scoreReport(base) };
     });
@@ -374,6 +488,8 @@ export interface VisionTesterOptions {
   /** Try the real browser first (falls back to static). */
   preferBrowser?: boolean;
   classifier?: PurposeClassifier;
+  /** Trained ONNX models, so the audit judges pixels and not only markup. */
+  inspector?: VisualInspector;
   logger?: (message: string, fields?: JsonObject) => void;
 }
 
@@ -386,7 +502,7 @@ export class VisionTester {
   constructor(options: VisionTesterOptions = {}) {
     const classifier = options.classifier ?? classifyPurposeHeuristic;
     this.staticDriver = new StaticTestDriver(classifier);
-    this.browserDriver = new BrowserTestDriver(classifier);
+    this.browserDriver = new BrowserTestDriver(classifier, options.inspector);
     this.preferBrowser = options.preferBrowser ?? true;
     this.logger = options.logger;
   }
@@ -406,6 +522,7 @@ export class VisionTester {
         driver: 'static' as const,
         responsive: [{ viewport: 'static', width: 0, overflow: false, note: 'URL analysis needs the browser driver' }],
         console: { errors: [], warnings: [] },
+        network: [],
         accessibility: [{ rule: 'driver', severity: 'info' as const, detail: 'install playwright-core + Chromium for live URL testing' }],
         performance: { note: 'unavailable without a browser' },
         elements: [],
@@ -489,3 +606,13 @@ export function createVisionTools(tester: VisionTester): Tool[] {
   };
   return [audit, screenshot, interact];
 }
+
+export {
+  createAppPreviewTool,
+  PreviewRunner,
+  PREVIEW_DIR,
+  type PreviewRunnerOptions,
+  type PreviewResult,
+  type PreviewPage,
+  type PreviewStep,
+} from './preview.js';

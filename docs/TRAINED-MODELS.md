@@ -105,6 +105,34 @@ const screen = await megaai.desktop.observe({ url }, { pixels: true });
 
 Agents reach the same capability through `desktop.observe` with `pixels: true`.
 
+`vision.audit` and `app.preview` also run them: every page they load is
+screenshotted and passed to the screen classifier, the defect detector and the
+element detector, so the report says what the rendered page *looks* like
+alongside what its DOM says. A defect the detector is at least 60% sure of is
+raised as an issue with a severity; below that it is reported as a raw guess
+and nothing more.
+
+```jsonc
+"visual": { "screenKind": "product-list", "screenConfidence": 0.94,
+            "defect": "overflow", "defectConfidence": 0.83, "elementsDetected": 21 }
+```
+
+### When they are not running
+
+`onnxruntime-node` is an optional dependency, so a failed download of its
+native binary is skipped **silently** — and every audit then falls back to DOM
+analysis with nothing to say it did. That is now reported rather than hidden:
+
+- `loadDeepModels()` returns an `unavailable` string explaining exactly what is
+  missing (no weights / no runtime / no `pngjs` / a session that would not open)
+- the cloud executor posts it as a `vision` event at the start of every run
+- `vision.audit` puts it in `visual.note`
+- CI prints the verdict on every build
+
+```bash
+npm install onnxruntime-node   # the usual fix
+```
+
 ## Reproducing or improving them
 
 ```bash

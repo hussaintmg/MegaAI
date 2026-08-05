@@ -4,7 +4,14 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_FILE_TEXT, MAX_TOTAL_TEXT, sanitizeGoalFiles, sanitizeProviderTallies } from './delivery.ts';
+import {
+  MAX_FILE_TEXT,
+  MAX_IMAGE_CHARS,
+  MAX_IMAGE_TOTAL_CHARS,
+  MAX_TOTAL_TEXT,
+  sanitizeGoalFiles,
+  sanitizeProviderTallies,
+} from './delivery.ts';
 import { buildPreview, resolveRelative } from './preview.ts';
 import { createZip } from './zip.ts';
 
@@ -129,4 +136,35 @@ test('the download zip is a real archive that unzip accepts', () => {
   assert.equal(readFileSync(join(dir, 'out/src/app.js'), 'utf8'), 'console.log("drive")');
   assert.equal(readFileSync(join(dir, 'out/public/index.html'), 'utf8'), '<h1>car</h1>'.repeat(80));
   assert.equal(readFileSync(join(dir, 'out/tiny.txt'), 'utf8'), 'a', 'incompressible input is stored, not mangled');
+});
+
+test('a screenshot of the running app survives, and only as a PNG data URL', () => {
+  const png = `data:image/png;base64,${'A'.repeat(200)}`;
+  const files = sanitizeGoalFiles([
+    { path: '.megaai/preview/home.png', bytes: 150, image: png },
+    // Anything else claiming to be an image is not rendered into the page.
+    { path: 'evil.svg', bytes: 10, image: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' },
+    { path: 'remote.png', bytes: 10, image: 'https://attacker.test/x.png' },
+    { path: 'js.png', bytes: 10, image: 'javascript:alert(1)' },
+  ]);
+  assert.equal(files[0]?.image, png);
+  for (const rejected of files.slice(1)) {
+    assert.equal(rejected.image, undefined, `${rejected.path} must not be rendered`);
+    assert.equal(rejected.binary, true, `${rejected.path} falls back to "binary"`);
+  }
+});
+
+test('screenshots have their own budget and cannot swallow the document', () => {
+  const big = `data:image/png;base64,${'A'.repeat(MAX_IMAGE_CHARS + 10)}`;
+  const [oversized] = sanitizeGoalFiles([{ path: 'huge.png', bytes: 1, image: big }]);
+  assert.equal(oversized?.image, undefined, 'a single oversized image is dropped');
+
+  const one = `data:image/png;base64,${'A'.repeat(600 * 1024)}`;
+  const many = sanitizeGoalFiles(
+    Array.from({ length: 10 }, (_, i) => ({ path: `s${i}.png`, bytes: 1, image: one })),
+  );
+  const stored = many.reduce((sum, f) => sum + (f.image?.length ?? 0), 0);
+  assert.ok(stored <= MAX_IMAGE_TOTAL_CHARS, `stored ${stored} exceeds ${MAX_IMAGE_TOTAL_CHARS}`);
+  assert.ok(many.some((f) => f.image), 'the first few still make it through');
+  assert.equal(many.length, 10, 'and every screenshot is still listed');
 });

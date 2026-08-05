@@ -88,6 +88,15 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
 .provider-row .status.set { color: var(--ok); }
 .provider-row .status.unset { color: #64708a; }
 
+/* Screenshots of the app while it was running. */
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.shots figure { margin: 0; }
+.shots img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 10px; background: #fff;
+}
+.shots figcaption { color: var(--muted); font-size: 12px; padding-top: 6px; }
+
 /* Delivery browser: file list beside the file itself. */
 .delivery { display: grid; grid-template-columns: 240px 1fr; gap: 12px; align-items: start; }
 .filelist { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }

@@ -19,9 +19,22 @@ jobs:
       - name: Build
         run: npm run build
       - name: Test
-        run: node --test "packages/**/*.test.js" "apps/**/*.test.js"
+        run: node --test "packages/**/*.test.js" "apps/**/*.test.js" "scripts/**/*.test.mjs"
       - name: Demo (end-to-end smoke test)
         run: node apps/cli/dist/index.js demo --quiet
+      # onnxruntime-node is an optional dependency: a failed download of its
+      # native binary is skipped in silence, and every vision audit then falls
+      # back to DOM analysis with nothing saying so. Print the verdict.
+      - name: Check the trained vision models load
+        run: |
+          node -e "
+          import('./packages/models/dist/index.js').then(async (m) => {
+            const d = await m.loadDeepModels(m.defaultModelDirs());
+            console.log('ui-detector      :', Boolean(d.detector));
+            console.log('screen-classifier:', Boolean(d.screenClassifier));
+            console.log('defect-detector  :', Boolean(d.defectDetector));
+            console.log(d.unavailable ? 'UNAVAILABLE: ' + d.unavailable : 'all three loaded');
+          })"
       - name: Build cloud platform (Next.js)
         run: npx next build
         working-directory: apps/web

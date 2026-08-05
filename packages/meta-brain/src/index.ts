@@ -25,11 +25,21 @@ import { type Clock, extractJsonObject, isPlainObject, newId, systemClock, trunc
 import type { Database, Collection } from '@megaai/database';
 import type { EventBus } from '@megaai/events';
 import type { ResourceMonitor } from '@megaai/resources';
+import { chooseStack, type StackSpec } from './stacks.js';
+
+export { STACKS, chooseStack, type StackId, type StackSpec } from './stacks.js';
 
 /** Runs one completion — injected so the meta brain stays decoupled from @megaai/ai. */
 export type PlanCompleter = (request: CompletionRequest) => Promise<CompletionResponse>;
 
-/** Agent kinds the built-in fleet can execute (unknowns coerce to coding). */
+/**
+ * Agent kinds the built-in fleet can execute (unknowns coerce to coding).
+ *
+ * Must stay in step with BUILTIN_AGENT_DESCRIPTORS: a kind missing here is
+ * silently rewritten to "coding" by `coerceAgentKind`, which is how the
+ * vision-testing and desktop agents went unschedulable under the model
+ * planner despite being fully implemented. A test pins the two lists together.
+ */
 export const KNOWN_AGENT_KINDS = [
   'coding',
   'testing',
@@ -43,6 +53,8 @@ export const KNOWN_AGENT_KINDS = [
   'build',
   'browser',
   'support',
+  'vision-testing',
+  'desktop',
 ] as const;
 
 const COMPLEXITIES: TaskComplexity[] = ['trivial', 'standard', 'complex', 'frontier'];
@@ -58,6 +70,8 @@ export interface GoalAnalysis {
   /** Feature keywords detected in the goal. */
   features: string[];
   projectName: string;
+  /** The framework and file layout this project will be built on. */
+  stack: StackSpec;
 }
 
 /**
@@ -163,7 +177,8 @@ export function analyzeGoal(goal: string): GoalAnalysis {
     .filter(([, phrases]) => phrases.some((phrase) => containsPhrase(normalized, phrase)))
     .map(([feature]) => feature);
   const projectName = truncate(goal.replace(/\s+/g, ' ').trim(), 60) || 'Untitled project';
-  return { domain, features, projectName };
+  const stack = chooseStack(domain, (phrase) => containsPhrase(normalized, phrase));
+  return { domain, features, projectName, stack };
 }
 
 /* ------------------------------------------------------------------ *
@@ -180,7 +195,81 @@ function task(
   return { title, description, agentKind, complexity, dependsOnTitles };
 }
 
-function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
+/**
+ * A coding task that carries the project's stack contract.
+ *
+ * The contract is repeated on every coding task rather than stated once at the
+ * start. Agents run independently, each with its own context window, so a
+ * contract mentioned only in the scaffold task is invisible to the agent
+ * writing the checkout page an hour later — and that agent is exactly the one
+ * that reaches for a lone `<div>` and inline styles.
+ */
+function codeTask(
+  stack: StackSpec,
+  title: string,
+  complexity: TaskComplexity,
+  description: string,
+  dependsOnTitles?: string[],
+): PlanTask {
+  return task(title, 'coding', complexity, `${description}\n\n${stack.contract}`, dependsOnTitles);
+}
+
+/** Verify the project genuinely installs and compiles — not that files exist. */
+function buildTask(stack: StackSpec): PlanTask {
+  return task(
+    'Install and build the app',
+    'build',
+    'standard',
+    `Run pipeline.run with these steps, in order, from the project root:\n` +
+      `1. { "name": "install", "command": "${stack.install[0]}", "args": ${JSON.stringify(stack.install.slice(1))} }\n` +
+      `2. { "name": "build", "command": "${stack.build[0]}", "args": ${JSON.stringify(stack.build.slice(1))} }\n` +
+      `A failing step fails this task — do not report success over a broken build. ` +
+      `If the build fails, read the error, fix the offending file with fs.write, and run the pipeline again.`,
+  );
+}
+
+/** Start the real app and look at it — the step that proves it actually works. */
+function previewTask(stack: StackSpec, routes: string[]): PlanTask {
+  return task(
+    'Run the app and inspect it',
+    'vision-testing',
+    'standard',
+    `Use app.preview to install, build, start and photograph the running app:\n` +
+      `{ "install": true, "build": true, "start": ${JSON.stringify(stack.start)}, ` +
+      `"port": ${stack.port}, "routes": ${JSON.stringify(routes)} }\n` +
+      `It returns, per route, the HTTP status, the audit (responsive overflow across ` +
+      `viewports, console errors, accessibility, performance) and a screenshot path. ` +
+      `Report every issue with its severity. A route that does not return 200, or a ` +
+      `page with console errors, is a failure — say so plainly rather than passing it.`,
+  );
+}
+
+function deployTask(stack: StackSpec): PlanTask {
+  return task(
+    'Deployment preparation',
+    'devops',
+    'standard',
+    `Write the deployment configuration for a ${stack.label} app (build command ` +
+      `"${stack.build.join(' ')}", start command "${stack.start.join(' ')}", port ${stack.port}), ` +
+      `then deploy.plan and deploy.execute. Report the resulting URL.`,
+  );
+}
+
+/** The scaffold task — always first, and the one that fixes the stack in place. */
+function scaffoldTask(stack: StackSpec, goal: string): PlanTask {
+  return codeTask(
+    stack,
+    'Project scaffold',
+    'standard',
+    `Create the project skeleton for: ${goal}\n` +
+      `Write every file listed below, with real content — package.json with the correct ` +
+      `dependencies and scripts, the config files, the root layout/entrypoint and a home ` +
+      `page that renders something real. Nothing may be a TODO or a placeholder.`,
+  );
+}
+
+function corePhasesFor(analysis: GoalAnalysis, goal: string): PlanSpec['phases'] {
+  const { domain, stack } = analysis;
   switch (domain) {
     case 'ecommerce':
       return [
@@ -188,41 +277,57 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
           name: 'Discovery',
           tasks: [
             task('Requirements research', 'research', 'standard', `Clarify requirements, users and constraints for: ${goal}`),
-            task('System architecture', 'architecture', 'complex', 'Design components, data flow and integration points for the store'),
+            task(
+              'System architecture',
+              'architecture',
+              'complex',
+              `Design the store on ${stack.label}: route map, component boundaries, API route handlers and the data model.`,
+            ),
           ],
         },
         {
           name: 'Foundation',
           tasks: [
-            task('Project scaffold setup', 'coding', 'standard', 'Initialise the project: package manifest, entrypoint, folder layout'),
-            task('Database schema and models', 'coding', 'complex', 'Design product, order and customer schema with a data-access layer'),
+            scaffoldTask(stack, goal),
+            codeTask(
+              stack,
+              'Design system and layout',
+              'standard',
+              'Build the shared shell: root layout, global stylesheet with design tokens, header, footer and navigation components.',
+            ),
+            codeTask(
+              stack,
+              'Domain model and data layer',
+              'complex',
+              'Types and data access for products, orders and customers in lib/ — one source of truth the pages and API routes both read.',
+            ),
           ],
         },
         {
           name: 'Core features',
           tasks: [
-            task('Authentication module', 'coding', 'complex', 'User signup, login and session verification'),
-            task('Product catalog API', 'coding', 'complex', 'REST endpoints for listing and managing products'),
-            task('Storefront UI pages', 'coding', 'standard', 'Customer-facing catalog and product pages'),
-            task('Cart and checkout flow', 'coding', 'complex', 'Cart management and checkout order placement'),
+            codeTask(stack, 'Catalog API routes', 'complex', 'Route handlers for listing, filtering and reading products, with validation and correct status codes.'),
+            codeTask(stack, 'Storefront pages', 'complex', 'Catalog and product-detail pages composed from components, fetching through the data layer.'),
+            codeTask(stack, 'Cart and checkout', 'complex', 'Cart state, the checkout page and the order-placement API route.'),
+            codeTask(stack, 'Authentication', 'complex', 'Sign-up, sign-in and session verification, with the routes and API handlers it needs.'),
           ],
         },
         {
           name: 'Quality',
           tasks: [
-            task('Build verification', 'build', 'standard', 'Verify every source file builds and parses cleanly'),
-            task('Automated test suite', 'testing', 'standard', 'Tests covering auth, catalog and checkout behaviour'),
-            task('Visual and responsive testing', 'vision-testing', 'standard', 'Check the storefront renders responsively without console errors'),
-            task('Code review pass', 'review', 'standard', 'Review all modules for defects and risks'),
+            buildTask(stack),
+            task('Automated test suite', 'testing', 'standard', 'Tests covering the data layer, the API route handlers and the checkout path. Run them.'),
+            previewTask(stack, ['/', '/products', '/cart']),
+            task('Code review pass', 'review', 'standard', 'Review every module for defects and risks.'),
           ],
         },
         {
           name: 'Launch',
           tasks: [
-            task('Project documentation', 'documentation', 'trivial', 'User and developer docs for the store'),
-            task('Launch marketing content', 'marketing', 'trivial', 'Landing copy and launch announcement'),
-            task('Deployment preparation', 'devops', 'standard', 'Deployment plan, environment config and rollback strategy'),
-            task('Client CRM update', 'crm', 'trivial', 'Record delivery status and follow-ups for the client'),
+            task('Project documentation', 'documentation', 'trivial', 'README covering how to install, run and deploy the store.'),
+            task('Launch marketing content', 'marketing', 'trivial', 'Landing copy and launch announcement.'),
+            deployTask(stack),
+            task('Client CRM update', 'crm', 'trivial', 'Record delivery status and follow-ups for the client.'),
           ],
         },
       ];
@@ -232,38 +337,40 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
           name: 'Discovery',
           tasks: [
             task('Requirements research', 'research', 'standard', `Identify industry, modules, budget and risks for: ${goal}`),
-            task('System architecture', 'architecture', 'complex', 'Module boundaries and shared data model for the ERP'),
+            task('System architecture', 'architecture', 'complex', `Module boundaries and the shared data model, on ${stack.label}.`),
           ],
         },
         {
           name: 'Foundation',
           tasks: [
-            task('Project scaffold setup', 'coding', 'standard', 'Initialise the ERP project skeleton'),
-            task('Authentication module', 'coding', 'complex', 'Role-based access for ERP users'),
+            scaffoldTask(stack, goal),
+            codeTask(stack, 'Design system and app shell', 'standard', 'Root layout, global styles, navigation between modules.'),
+            codeTask(stack, 'Authentication and roles', 'complex', 'Role-based access, with the routes and API handlers it needs.'),
           ],
         },
         {
           name: 'Modules',
           tasks: [
-            task('Inventory module', 'coding', 'complex', 'Stock tracking, locations and movements'),
-            task('Accounting module', 'coding', 'complex', 'Ledger, invoices and payment records'),
-            task('Reporting module', 'coding', 'standard', 'Cross-module summary reports'),
+            codeTask(stack, 'Inventory module', 'complex', 'Stock tracking, locations and movements: pages, API routes and typed data access.'),
+            codeTask(stack, 'Accounting module', 'complex', 'Ledger, invoices and payment records: pages, API routes and typed data access.'),
+            codeTask(stack, 'Reporting module', 'standard', 'Cross-module summary reports reading through the data layer.'),
           ],
         },
         {
           name: 'Quality',
           tasks: [
-            task('Build verification', 'build', 'standard', 'Verify every module builds and parses cleanly'),
-            task('Automated test suite', 'testing', 'standard', 'Module and integration tests'),
-            task('Code review pass', 'review', 'standard', 'Review all modules'),
+            buildTask(stack),
+            task('Automated test suite', 'testing', 'standard', 'Module and integration tests. Run them.'),
+            previewTask(stack, ['/', '/inventory', '/accounting']),
+            task('Code review pass', 'review', 'standard', 'Review every module.'),
           ],
         },
         {
           name: 'Launch',
           tasks: [
-            task('Project documentation', 'documentation', 'trivial', 'Admin and user documentation'),
-            task('Deployment preparation', 'devops', 'standard', 'Deployment plan and configs'),
-            task('Client CRM update', 'crm', 'trivial', 'Record delivery status for the client'),
+            task('Project documentation', 'documentation', 'trivial', 'Admin and user documentation.'),
+            deployTask(stack),
+            task('Client CRM update', 'crm', 'trivial', 'Record delivery status for the client.'),
           ],
         },
       ];
@@ -273,23 +380,25 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
           name: 'Design',
           tasks: [
             task('Requirements research', 'research', 'standard', `Define resources, consumers and SLAs for: ${goal}`),
-            task('API architecture', 'architecture', 'standard', 'Endpoint design and data contracts'),
+            task('API architecture', 'architecture', 'standard', 'Endpoint design, data contracts and error taxonomy.'),
           ],
         },
         {
           name: 'Build',
           tasks: [
-            task('Project scaffold setup', 'coding', 'standard', 'Initialise service skeleton'),
-            task('Core API endpoints', 'coding', 'complex', 'Implement the primary endpoints and validation'),
+            scaffoldTask(stack, goal),
+            codeTask(stack, 'Domain model and data layer', 'complex', 'Typed domain models and data access, independent of HTTP.'),
+            codeTask(stack, 'Core API endpoints', 'complex', 'The primary routes with input validation, correct status codes and error handling.'),
           ],
         },
         {
           name: 'Quality & launch',
           tasks: [
-            task('Build verification', 'build', 'standard', 'Verify the service builds and parses cleanly'),
-            task('Automated test suite', 'testing', 'standard', 'Endpoint tests including error paths'),
-            task('Project documentation', 'documentation', 'trivial', 'API reference and quickstart'),
-            task('Deployment preparation', 'devops', 'standard', 'Deployment plan and configs'),
+            buildTask(stack),
+            task('Automated test suite', 'testing', 'standard', 'Endpoint tests including the error paths. Run them.'),
+            previewTask(stack, stack.routes),
+            task('Project documentation', 'documentation', 'trivial', 'API reference and quickstart.'),
+            deployTask(stack),
           ],
         },
       ];
@@ -297,22 +406,51 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
       return [
         {
           name: 'Design',
-          tasks: [task('Content and structure research', 'research', 'standard', `Pages, audience and tone for: ${goal}`)],
+          tasks: [
+            task('Content and structure research', 'research', 'standard', `Pages, audience, tone and the content each page needs for: ${goal}`),
+            task(
+              'UI and component architecture',
+              'architecture',
+              'standard',
+              `Decide the route map and the component breakdown on ${stack.label}: which sections become components, what each page composes, and what the API routes serve.`,
+            ),
+          ],
         },
         {
           name: 'Build',
           tasks: [
-            task('Project scaffold setup', 'coding', 'standard', 'Initialise the site skeleton'),
-            task('Site pages UI', 'coding', 'standard', 'Build the pages and navigation'),
+            scaffoldTask(stack, goal),
+            codeTask(
+              stack,
+              'Design system and layout',
+              'standard',
+              'Root layout, global stylesheet with design tokens (colour, spacing, type scale), responsive rules, header, footer and navigation components.',
+            ),
+            codeTask(
+              stack,
+              'Home page',
+              'complex',
+              `The landing page for: ${goal}. Compose it from real components — hero, feature/content sections, call to action — with genuine copy, not lorem ipsum.`,
+            ),
+            codeTask(stack, 'Content pages and navigation', 'complex', 'The remaining routes, each its own page file, wired into the navigation.'),
+            codeTask(stack, 'API routes and data layer', 'standard', 'Typed data in lib/ plus the API route handlers the pages read from (content, contact form, or whatever this site needs).'),
           ],
         },
         {
-          name: 'Quality & launch',
+          name: 'Quality',
           tasks: [
-            task('Automated test suite', 'testing', 'trivial', 'Smoke tests for the site'),
-            task('Visual and responsive testing', 'vision-testing', 'standard', 'Check the site renders responsively without console errors'),
-            task('Launch marketing content', 'marketing', 'trivial', 'Announcement and SEO copy'),
-            task('Deployment preparation', 'devops', 'standard', 'Hosting plan and configs'),
+            buildTask(stack),
+            task('Automated test suite', 'testing', 'standard', 'Tests for the data layer and the API route handlers. Run them.'),
+            previewTask(stack, ['/']),
+            task('Code review pass', 'review', 'standard', 'Review the pages, components and data layer for defects and risks.'),
+          ],
+        },
+        {
+          name: 'Launch',
+          tasks: [
+            task('Project documentation', 'documentation', 'trivial', 'README: how to install, run, and deploy the site.'),
+            task('Launch marketing content', 'marketing', 'trivial', 'Announcement and SEO copy.'),
+            deployTask(stack),
           ],
         },
       ];
@@ -325,15 +463,17 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
         {
           name: 'Build',
           tasks: [
-            task('Project scaffold setup', 'coding', 'standard', 'Initialise the project skeleton'),
-            task('Implement core functionality', 'coding', 'complex', goal),
+            scaffoldTask(stack, goal),
+            codeTask(stack, 'Implement core functionality', 'complex', goal),
           ],
         },
         {
           name: 'Verify & deliver',
           tasks: [
-            task('Automated test suite', 'testing', 'standard', 'Verify the core functionality'),
-            task('Project documentation', 'documentation', 'trivial', 'Document what was built and how to run it'),
+            buildTask(stack),
+            task('Automated test suite', 'testing', 'standard', 'Verify the core functionality. Run the tests.'),
+            previewTask(stack, stack.routes),
+            task('Project documentation', 'documentation', 'trivial', 'Document what was built and how to run it.'),
           ],
         },
       ];
@@ -342,11 +482,14 @@ function corePhasesFor(domain: Domain, goal: string): PlanSpec['phases'] {
 
 export function generatePlan(goal: string): PlanSpec {
   const analysis = analyzeGoal(goal);
-  const phases = corePhasesFor(analysis.domain, goal);
+  const phases = corePhasesFor(analysis, goal);
   return {
     projectName: analysis.projectName,
     domain: analysis.domain,
-    summary: `Detected domain "${analysis.domain}"${analysis.features.length > 0 ? ` with features: ${analysis.features.join(', ')}` : ''}. ${phases.length} phases, ${phases.reduce((n, p) => n + p.tasks.length, 0)} tasks.`,
+    summary:
+      `Detected domain "${analysis.domain}" — building on ${analysis.stack.label}` +
+      `${analysis.features.length > 0 ? ` with features: ${analysis.features.join(', ')}` : ''}. ` +
+      `${phases.length} phases, ${phases.reduce((n, p) => n + p.tasks.length, 0)} tasks.`,
     phases,
     risks:
       analysis.domain === 'generic'
@@ -377,7 +520,20 @@ Given a goal, produce a concrete, phased delivery plan and respond with ONLY a J
   "risks": ["..."],
   "questionsForHuman": ["..."]
 }
-Phases run in order. Always include research, implementation (coding), a build check, tests, documentation and a deployment task. No prose outside the JSON.`;
+Phases run in order.
+
+Always include: research, architecture, implementation (several focused coding
+tasks — not one "build everything"), a build check, tests, a "Run the app and
+inspect it" vision-testing task, documentation and a deployment task.
+
+Pick a real stack and say so. Anything with a user interface is built on
+Next.js (App Router) + TypeScript + React unless the goal names another one; a
+headless service is Node.js + TypeScript. A static \`index.html\` is never an
+acceptable delivery. Every coding task description must state the files it
+creates — pages, components, API route handlers, typed data access — so the
+agent that receives it in isolation knows the layout it is working in.
+
+No prose outside the JSON.`;
 
 function coerceAgentKind(value: unknown): string {
   return typeof value === 'string' && (KNOWN_AGENT_KINDS as readonly string[]).includes(value) ? value : 'coding';
