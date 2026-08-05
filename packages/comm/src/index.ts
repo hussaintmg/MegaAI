@@ -76,7 +76,7 @@ export class WebhookChannel implements Channel {
     private readonly url: string,
     private readonly options: { allowedHosts?: string[]; timeoutMs?: number; clock?: Clock } = {},
   ) {
-    const host = new URL(url).hostname;
+    const host = parseConfiguredUrl(url, 'The webhook URL').hostname;
     const allowed = options.allowedHosts ?? [];
     if (allowed.length > 0 && !allowed.some((h) => host === h || host.endsWith(`.${h}`))) {
       throw new MegaError('PERMISSION_DENIED', `Webhook host "${host}" is not on the comm allowlist`);
@@ -197,12 +197,25 @@ export class EmailChannel implements Channel {
   }
 }
 
+/** Parse a configured URL, naming the setting so the message is actionable. */
+function parseConfiguredUrl(url: string, setting: string): URL {
+  try {
+    return new URL(url);
+  } catch {
+    throw new MegaError(
+      'INVALID_INPUT',
+      `${setting} is not a valid URL: "${url}". It needs the scheme too, e.g. https://api.example.com/send`,
+      { setting, value: url },
+    );
+  }
+}
+
 /** Deliver email by POSTing to an HTTP email API (SendGrid/Postmark-style). Host-allowlisted. */
 export function createHttpEmailTransport(
   url: string,
   options: { allowedHosts?: string[]; timeoutMs?: number; apiKey?: string; headers?: Record<string, string> } = {},
 ): EmailTransport {
-  const host = new URL(url).hostname;
+  const host = parseConfiguredUrl(url, 'The email API URL').hostname;
   const allowed = options.allowedHosts ?? [];
   if (allowed.length > 0 && !allowed.some((h) => host === h || host.endsWith(`.${h}`))) {
     throw new MegaError('PERMISSION_DENIED', `Email API host "${host}" is not on the comm allowlist`);

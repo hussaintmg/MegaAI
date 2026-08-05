@@ -170,7 +170,9 @@ async function main() {
 
 main().catch(async (err) => {
   const message = err instanceof Error ? err.message : String(err);
-  console.error('executor: fatal:', message);
+  // The stack goes to the workflow log — a bare "Invalid URL" with no frames
+  // told us nothing about which setting was at fault.
+  console.error('executor: fatal:', err instanceof Error ? (err.stack ?? message) : message);
   await drainEvents().catch(() => undefined);
   await postFinal({ status: 'failed', error: message }).catch(() => undefined);
   process.exit(1);

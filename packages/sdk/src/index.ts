@@ -312,26 +312,37 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   // a webhook channel is added when a URL is configured.
   const comm = new CommEngine(clock);
   comm.register(new CapturedChannel('captured', clock));
+  // Communication channels are optional extras. A mistyped URL in one of them
+  // must not take the whole engine down — it disables that channel, loudly.
+  const commLog = logger.child('comm');
   if (config.comm.webhookUrl) {
-    comm.register(new WebhookChannel('webhook', config.comm.webhookUrl, { allowedHosts: config.comm.allowedHosts, clock }));
+    try {
+      comm.register(new WebhookChannel('webhook', config.comm.webhookUrl, { allowedHosts: config.comm.allowedHosts, clock }));
+    } catch (err) {
+      commLog.warn('webhook channel disabled', { error: err instanceof Error ? err.message : String(err) });
+    }
   }
   // Native email: registered when a from-address is configured. Real delivery
   // uses an HTTP email API or SMTP (nodemailer) when set; otherwise the channel
   // composes and captures the RFC5322 message offline.
   if (config.comm.email.from) {
-    const emailTransport = config.comm.email.apiUrl
-      ? createHttpEmailTransport(config.comm.email.apiUrl, { allowedHosts: config.comm.email.allowedHosts, apiKey: config.comm.email.apiKey || undefined })
-      : config.comm.email.smtpHost
-        ? createSmtpTransport({ host: config.comm.email.smtpHost })
-        : undefined;
-    comm.register(
-      new EmailChannel('email', {
-        from: config.comm.email.from,
-        defaultTo: config.comm.email.to || undefined,
-        transport: emailTransport,
-        clock,
-      }),
-    );
+    try {
+      const emailTransport = config.comm.email.apiUrl
+        ? createHttpEmailTransport(config.comm.email.apiUrl, { allowedHosts: config.comm.email.allowedHosts, apiKey: config.comm.email.apiKey || undefined })
+        : config.comm.email.smtpHost
+          ? createSmtpTransport({ host: config.comm.email.smtpHost })
+          : undefined;
+      comm.register(
+        new EmailChannel('email', {
+          from: config.comm.email.from,
+          defaultTo: config.comm.email.to || undefined,
+          transport: emailTransport,
+          clock,
+        }),
+      );
+    } catch (err) {
+      commLog.warn('email channel disabled', { error: err instanceof Error ? err.message : String(err) });
+    }
   }
   const commDefaultChannel = comm.has(config.comm.notifyChannel) ? config.comm.notifyChannel : 'captured';
   tools.register(createCommTool(comm, commDefaultChannel));

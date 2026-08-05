@@ -141,3 +141,13 @@ test('comm engine routes to a registered email channel', async () => {
   assert.equal(receipt.ok, true);
   assert.equal(receipt.channel, 'email');
 });
+
+test('a mistyped URL names the setting instead of throwing a bare "Invalid URL"', () => {
+  // A live run died with only "Invalid URL" in the log, which said nothing
+  // about which of several optional URL settings was at fault.
+  assert.throws(() => createHttpEmailTransport('smtp.gmail.com'), /email API URL is not a valid URL.*smtp\.gmail\.com/s);
+  assert.throws(() => createHttpEmailTransport('smtp.gmail.com'), /needs the scheme/);
+  assert.throws(() => new WebhookChannel('hook', 'hooks.slack.com/x'), /webhook URL is not a valid URL/);
+  // Valid ones still construct.
+  assert.doesNotThrow(() => createHttpEmailTransport('https://api.example.com/send'));
+});
