@@ -9,6 +9,7 @@ import {
   MAX_IMAGE_CHARS,
   MAX_IMAGE_TOTAL_CHARS,
   MAX_TOTAL_TEXT,
+  sanitizeDeployment,
   sanitizeGoalFiles,
   sanitizeProviderTallies,
 } from './delivery.ts';
@@ -167,4 +168,37 @@ test('screenshots have their own budget and cannot swallow the document', () => 
   assert.ok(stored <= MAX_IMAGE_TOTAL_CHARS, `stored ${stored} exceeds ${MAX_IMAGE_TOTAL_CHARS}`);
   assert.ok(many.some((f) => f.image), 'the first few still make it through');
   assert.equal(many.length, 10, 'and every screenshot is still listed');
+});
+
+test('a deployment link is only ever an https URL', () => {
+  // This becomes an anchor in the dashboard, and the value arrives from the
+  // runner — so a javascript: or data: URL must never survive.
+  assert.equal(sanitizeDeployment({ url: 'javascript:alert(1)', simulated: false }), undefined);
+  assert.equal(sanitizeDeployment({ url: 'http://insecure.test', simulated: false }), undefined);
+  assert.equal(sanitizeDeployment({ url: 'data:text/html,<h1>x', simulated: false }), undefined);
+  assert.equal(sanitizeDeployment({ url: 'https://ok.test/a b', simulated: false }), undefined);
+  assert.equal(sanitizeDeployment(undefined), undefined);
+  assert.equal(sanitizeDeployment({ simulated: false }), undefined);
+
+  const ok = sanitizeDeployment({
+    url: 'https://car-site-abc.vercel.app',
+    target: 'vercel',
+    simulated: false,
+    inspectorUrl: 'https://vercel.com/x/dpl_1',
+  });
+  assert.deepEqual(ok, {
+    url: 'https://car-site-abc.vercel.app',
+    target: 'vercel',
+    simulated: false,
+    inspectorUrl: 'https://vercel.com/x/dpl_1',
+  });
+});
+
+test('a simulated deployment is marked as such, so its URL is not offered as a link', () => {
+  const simulated = sanitizeDeployment({ url: 'https://shop.example.com', target: 'simulated' });
+  assert.equal(simulated?.simulated, true, 'absent means simulated — never assume a deploy was real');
+  // A bad inspector URL is dropped without taking the deployment with it.
+  const partial = sanitizeDeployment({ url: 'https://a.test', simulated: false, inspectorUrl: 'javascript:x' });
+  assert.equal(partial?.url, 'https://a.test');
+  assert.equal(partial?.inspectorUrl, undefined);
 });

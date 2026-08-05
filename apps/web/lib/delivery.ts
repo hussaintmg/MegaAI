@@ -15,6 +15,33 @@ export interface GoalFile {
   image?: string;
 }
 
+/** Where the delivery actually went live. */
+export interface GoalDeployment {
+  url: string;
+  target: string;
+  simulated: boolean;
+  inspectorUrl?: string;
+  error?: string;
+}
+
+/** Only somewhere the user can safely be sent. */
+export function sanitizeDeployment(input: unknown): GoalDeployment | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const entry = input as Record<string, unknown>;
+  const url = typeof entry.url === 'string' ? entry.url : '';
+  // A deployment URL becomes a link in the dashboard, so only https:// — a
+  // javascript: or data: URL arriving from the runner must never be rendered.
+  if (!/^https:\/\/[^\s"'<>]+$/.test(url)) return undefined;
+  const inspectorUrl = typeof entry.inspectorUrl === 'string' ? entry.inspectorUrl : '';
+  return {
+    url: url.slice(0, 500),
+    target: String(entry.target ?? '').slice(0, 40),
+    simulated: entry.simulated !== false,
+    ...(/^https:\/\/[^\s"'<>]+$/.test(inspectorUrl) ? { inspectorUrl: inspectorUrl.slice(0, 500) } : {}),
+    ...(typeof entry.error === 'string' ? { error: entry.error.slice(0, 500) } : {}),
+  };
+}
+
 /** Completions each provider served — proof of who wrote the delivery. */
 export interface GoalProviderTally {
   kind: string;

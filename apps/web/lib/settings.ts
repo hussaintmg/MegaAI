@@ -24,6 +24,8 @@ export interface SettingsDoc {
   fallbackChain: string[];
   planner: 'template' | 'model';
   email: { enabled: boolean; from: string; to: string; apiUrl: string; apiKeyEnc: string; smtpHost: string };
+  /** Deploying the delivery for real, so the goal ends with a live URL. */
+  deploy: { target: string; vercelTokenEnc: string };
 }
 
 const DEFAULTS: Omit<SettingsDoc, '_id'> = {
@@ -31,12 +33,20 @@ const DEFAULTS: Omit<SettingsDoc, '_id'> = {
   fallbackChain: ['gemini', 'openrouter', 'groq', 'mock'],
   planner: 'template',
   email: { enabled: false, from: '', to: '', apiUrl: '', apiKeyEnc: '', smtpHost: '' },
+  deploy: { target: 'vercel', vercelTokenEnc: '' },
 };
 
 export async function loadSettingsDoc(): Promise<SettingsDoc> {
   const db = await getDb();
   const doc = await db.collection<SettingsDoc>('settings').findOne({ _id: 'settings' });
-  return { _id: 'settings', ...DEFAULTS, ...doc, email: { ...DEFAULTS.email, ...doc?.email }, providers: doc?.providers ?? {} };
+  return {
+    _id: 'settings',
+    ...DEFAULTS,
+    ...doc,
+    email: { ...DEFAULTS.email, ...doc?.email },
+    deploy: { ...DEFAULTS.deploy, ...doc?.deploy },
+    providers: doc?.providers ?? {},
+  };
 }
 
 export async function saveSettingsDoc(doc: SettingsDoc): Promise<void> {
@@ -86,6 +96,17 @@ export function mergeSettings(existing: SettingsDoc, body: Record<string, unknow
   }
   if (body.planner === 'model' || body.planner === 'template') merged.planner = body.planner;
 
+  const deployIn = body.deploy;
+  if (deployIn && typeof deployIn === 'object') {
+    const d = deployIn as Record<string, unknown>;
+    merged.deploy = {
+      target: typeof d.target === 'string' ? d.target.slice(0, 40) : merged.deploy.target,
+      vercelTokenEnc: isMaskedOrEmpty(d.vercelToken)
+        ? merged.deploy.vercelTokenEnc
+        : encryptSecret(String(d.vercelToken)),
+    };
+  }
+
   const emailIn = body.email;
   if (emailIn && typeof emailIn === 'object') {
     const e = emailIn as Record<string, unknown>;
@@ -128,6 +149,11 @@ export function redactSettings(doc: SettingsDoc): Record<string, unknown> {
       apiKey: maskSecret(doc.email.apiKeyEnc),
       smtpHost: doc.email.smtpHost,
     },
+    deploy: {
+      target: doc.deploy.target,
+      vercelToken: maskSecret(doc.deploy.vercelTokenEnc),
+      configured: Boolean(doc.deploy.vercelTokenEnc),
+    },
   };
 }
 
@@ -157,5 +183,9 @@ export function executorSettings(doc: SettingsDoc): Record<string, unknown> {
           smtpHost: doc.email.smtpHost,
         }
       : undefined,
+    deploy: {
+      target: doc.deploy.target,
+      vercelToken: decryptSecret(doc.deploy.vercelTokenEnc) || undefined,
+    },
   };
 }

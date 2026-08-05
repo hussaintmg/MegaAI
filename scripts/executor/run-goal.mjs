@@ -140,6 +140,13 @@ async function main() {
       policy: { autoApprove: true },
       security: { allowShell: true, allowBrowser: true },
       meta: { planner: settings.planner === 'model' ? 'model' : 'template' },
+      // A real deployment when a Vercel token is saved, so the goal ends with
+      // a URL that opens. Without one every target simulates and the "URL" it
+      // reports leads nowhere.
+      deploy: {
+        defaultTarget: settings.deploy?.vercelToken ? (settings.deploy.target || 'vercel') : 'simulated',
+        vercelToken: settings.deploy?.vercelToken ?? '',
+      },
       ...(settings.email?.from
         ? {
             comm: {
@@ -206,6 +213,33 @@ async function main() {
   let report;
   const reportPath = join(result.workspaceDir, 'MEGAAI_REPORT.md');
   if (existsSync(reportPath)) report = readFileSync(reportPath, 'utf8');
+
+  // The live site, if the devops agent got one. This is the answer to "where
+  // can I actually look at it", so it travels as its own field rather than
+  // being buried in a report the reader has to search.
+  let deployment;
+  const deployPath = join(result.workspaceDir, '.megaai-deploy.json');
+  if (existsSync(deployPath)) {
+    try {
+      const record = JSON.parse(readFileSync(deployPath, 'utf8'));
+      if (record?.url) {
+        deployment = {
+          url: String(record.url),
+          target: String(record.target ?? ''),
+          simulated: record.simulated !== false,
+          ...(record.inspectorUrl ? { inspectorUrl: String(record.inspectorUrl) } : {}),
+          ...(record.error ? { error: String(record.error) } : {}),
+        };
+        const line = deployment.simulated
+          ? `Deployment was simulated — ${deployment.url} does not exist. Save a Vercel token in Settings for a real one.`
+          : `Live at ${deployment.url}`;
+        console.log(`executor: ${line}`);
+        await postEvent('deploy', line);
+      }
+    } catch {
+      // A malformed record is not worth failing the run over.
+    }
+  }
   const files = walkFiles(result.workspaceDir);
   const contents = collectContents(result.workspaceDir, files);
   const usage = megaai.sessions.usage();
@@ -250,6 +284,7 @@ async function main() {
     files,
     contents,
     providers: tallies,
+    ...(deployment ? { deployment } : {}),
     usage: { requests: usage.requests, tokens: usage.inputTokens + usage.outputTokens, costUsd: usage.estimatedCostUsd },
     ...(ok
       ? {}

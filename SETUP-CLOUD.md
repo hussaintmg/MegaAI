@@ -95,7 +95,13 @@ secret:
    artifact.)
 4. **Users** → add access for anyone else (you set their password; you can
    reset or remove them any time).
-5. **Schedules** → recurring goals (the `schedule-tick.yml` cron drives them).
+5. **Settings → Deployment** → paste a Vercel token
+   ([vercel.com/account/tokens](https://vercel.com/account/tokens)). With one
+   saved, every finished goal is deployed for real over the Vercel REST API
+   and the goal page shows a link you can open. Without one, the deploy step
+   only describes what it would do and the URL it reports leads nowhere — the
+   goal page says so rather than pretending otherwise.
+6. **Schedules** → recurring goals (the `schedule-tick.yml` cron drives them).
 
 ## Troubleshooting
 

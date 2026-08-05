@@ -88,6 +88,12 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
 .provider-row .status.set { color: var(--ok); }
 .provider-row .status.unset { color: #64708a; }
 
+/* The live site — the first thing to look for on a finished goal. */
+.panel.live { border-color: var(--accent); }
+.live-url {
+  display: inline-block; font-size: 17px; font-weight: 600; word-break: break-all;
+}
+
 /* Screenshots of the app while it was running. */
 .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .shots figure { margin: 0; }

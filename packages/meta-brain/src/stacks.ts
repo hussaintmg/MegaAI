@@ -134,6 +134,75 @@ const UI_HINTS = [
 ];
 
 /**
+ * Libraries a goal names outright.
+ *
+ * "build a 3d car website using three.js with gsap scroll animations" produced
+ * a plain page with none of them, because the contract listed the framework's
+ * own dependencies and stopped — so the agent had no reason to think three.js
+ * was part of the job. Whatever the goal asks for is now part of the contract,
+ * with the package names and how it is meant to be used.
+ */
+const LIBRARIES: Array<{ match: string[]; packages: string; how: string }> = [
+  {
+    match: ['three', 'three js', 'threejs', '3d', 'webgl'],
+    packages: 'three, @react-three/fiber, @react-three/drei (+ @types/three)',
+    how:
+      'Render the 3D scene in a client component (`\'use client\'`) with a `<Canvas>` from ' +
+      '@react-three/fiber. Keep the scene, its lighting and its controls in their own files under ' +
+      'components/. Load models with useGLTF, and always render a fallback while it loads.',
+  },
+  {
+    match: ['gsap', 'scrolltrigger'],
+    packages: 'gsap, @gsap/react',
+    how:
+      'Register ScrollTrigger once in a client component, drive scroll-linked animation with ' +
+      'gsap.timeline({ scrollTrigger: … }), and clean up in the effect\'s teardown so navigating ' +
+      'away does not leak triggers.',
+  },
+  {
+    match: ['framer motion', 'framer-motion', 'framer'],
+    packages: 'framer-motion',
+    how:
+      'Use `motion.*` elements with variants for entrance and hover, and `useInView` for reveal-on-scroll. ' +
+      'Respect prefers-reduced-motion.',
+  },
+  { match: ['tailwind', 'tailwindcss'], packages: 'tailwindcss, postcss, autoprefixer', how: 'Configure tailwind.config.ts and the postcss config, and import the directives in the global stylesheet.' },
+  { match: ['prisma'], packages: 'prisma, @prisma/client', how: 'Define schema.prisma and generate the client; keep every query behind lib/.' },
+  { match: ['mongodb', 'mongo'], packages: 'mongodb', how: 'One shared client in lib/db.ts, reused across requests — never one per handler.' },
+  { match: ['stripe'], packages: 'stripe', how: 'Server-side only, in an API route handler. Never put a secret key in a client component.' },
+  { match: ['shadcn', 'radix'], packages: 'the radix primitives the components need', how: 'Keep generated components under components/ui/ and compose them.' },
+];
+
+/** The libraries this goal names, if any. */
+export function detectLibraries(contains: (phrase: string) => boolean): Array<{ packages: string; how: string }> {
+  const found: Array<{ packages: string; how: string }> = [];
+  for (const lib of LIBRARIES) {
+    if (lib.match.some(contains)) found.push({ packages: lib.packages, how: lib.how });
+  }
+  return found;
+}
+
+/**
+ * What "finished" means, on top of the stack's file layout.
+ *
+ * The delivery that prompted this compiled and rendered — and looked like a
+ * scaffold, because nothing ever asked for more than files in the right place.
+ */
+const QUALITY_BAR = `Quality bar — this is a client deliverable, not a scaffold:
+- Real copy. Headings, body text and labels about *this* subject. No lorem ipsum,
+  no "Feature 1", no "Your text here".
+- A designed page, not a stack of default elements: a considered type scale,
+  consistent spacing, a colour palette held in CSS variables, and visual
+  hierarchy. Sections have breathing room.
+- Responsive from 375px up. Nothing overflows horizontally on a phone; the
+  navigation works there too.
+- Accessible: semantic landmarks (header/nav/main/footer), one h1, alt text on
+  every image, labels tied to inputs, visible focus states, and colour contrast
+  that passes AA.
+- Metadata: a real title and description, and Open Graph tags.
+- No console errors, and no dead links or buttons that do nothing.`;
+
+/**
  * Pick the stack for a goal. `contains` is the caller's word-boundary matcher
  * over the already-normalised goal, so this file stays free of the substring
  * bug that once made "api" match inside "rapid".
@@ -142,10 +211,22 @@ export function chooseStack(
   domain: string,
   contains: (phrase: string) => boolean,
 ): StackSpec {
-  for (const [id, phrases] of EXPLICIT) {
-    if (phrases.some(contains)) return STACKS[id];
+  let base = NEXTJS;
+  const explicit = EXPLICIT.find(([, phrases]) => phrases.some(contains));
+  if (explicit) base = STACKS[explicit[0]];
+  else if (domain === 'api') base = NODE_API;
+  else if (domain === 'generic' && !UI_HINTS.some(contains)) base = NODE_API;
+
+  const libraries = detectLibraries(contains);
+  const sections = [base.contract];
+  if (libraries.length > 0) {
+    sections.push(
+      `Required libraries — the goal asks for these by name. Add them to package.json ` +
+        `and genuinely use them; a delivery without them has not met the brief.\n` +
+        libraries.map((lib) => `- **${lib.packages}**\n  ${lib.how}`).join('\n'),
+    );
   }
-  if (domain === 'api') return NODE_API;
-  if (domain === 'generic' && !UI_HINTS.some(contains)) return NODE_API;
-  return NEXTJS;
+  if (base.id !== 'node-api') sections.push(QUALITY_BAR);
+
+  return { ...base, contract: sections.join('\n\n') };
 }

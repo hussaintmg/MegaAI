@@ -19,6 +19,7 @@ import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { JsonObject, JsonValue, Timestamp } from '@megaai/types';
 import { MegaError } from '@megaai/types';
+import { collectDeployFiles, deployToVercel } from './vercel.js';
 import { type Clock, slugify, systemClock } from '@megaai/utils';
 import type { Tool } from '@megaai/contracts';
 
@@ -42,6 +43,10 @@ export interface DeployPlan {
 }
 
 export interface DeployResult {
+  /** Vercel's build log for this deployment, when there is one. */
+  inspectorUrl?: string;
+  /** Why the deployment is not live, when it is not. */
+  error?: string;
   target: DeployTarget;
   appName: string;
   url: string;
@@ -78,8 +83,13 @@ function buildPlan(target: DeployTarget, appName: string, tokens: DeployTokens =
     case 'vercel':
       return {
         target,
-        description: 'Deploy to Vercel (production)',
-        commands: [{ command: 'vercel', args: ['deploy', '--prod', '--yes', ...(tokens.vercel ? ['--token', tokens.vercel] : [])] }],
+        description: tokens.vercel
+          ? 'Deploy to Vercel (production) over the REST API — no CLI needed'
+          : 'Deploy to Vercel (production) — no token saved, so this will simulate',
+        // No commands: the deployment goes over the REST API. The CLI is not
+        // installed on the runner and is not on the shell allowlist, so a
+        // command list here could only ever describe something that never ran.
+        commands: [],
         estimatedUrl: `https://${appName}.vercel.app`,
         simulated: false,
       };
@@ -118,6 +128,8 @@ export interface DeployEngineOptions {
   /** Provider tokens injected into deploy commands (redacted in results/logs). */
   tokens?: DeployTokens;
   clock?: Clock;
+  /** Injected for tests, so no real deployment is made. */
+  deployToVercel?: typeof deployToVercel;
 }
 
 /** Mask any secret token values inside a display string. */
@@ -132,12 +144,14 @@ export class DeployEngine {
   private readonly runner?: CommandRunner;
   private readonly tokens: DeployTokens;
   private readonly clock: Clock;
+  private readonly vercel: typeof deployToVercel;
 
   constructor(options: DeployEngineOptions = {}) {
     this.defaultTarget = options.defaultTarget ?? 'simulated';
     this.runner = options.runner;
     this.tokens = options.tokens ?? {};
     this.clock = options.clock ?? systemClock;
+    this.vercel = options.deployToVercel ?? deployToVercel;
   }
 
   appNameFor(workspaceDir: string, override?: string): string {
@@ -161,10 +175,46 @@ export class DeployEngine {
 
   async execute(
     workspaceDir: string,
-    options: { target?: DeployTarget; appName?: string } = {},
+    options: { target?: DeployTarget; appName?: string; framework?: string | null } = {},
   ): Promise<DeployResult> {
     const plan = this.plan(workspaceDir, options);
     const steps: DeployResult['steps'] = [];
+
+    // Vercel goes over the REST API, not the CLI: the runner has no `vercel`
+    // binary and never will, so the CLI path could only ever simulate — and a
+    // simulated deploy hands back a URL that resolves to nothing.
+    if (plan.target === 'vercel' && this.tokens.vercel) {
+      const files = collectDeployFiles(workspaceDir);
+      const deployment = await this.vercel({
+        token: this.tokens.vercel,
+        projectName: plan.appName,
+        files,
+        framework: options.framework ?? 'nextjs',
+      });
+      steps.push({
+        command: `vercel-api deploy (${deployment.files} files)`,
+        ok: deployment.ok,
+        exitCode: deployment.ok ? 0 : 1,
+      });
+      const deployed: DeployResult = {
+        target: 'vercel',
+        appName: plan.appName,
+        url: deployment.url,
+        simulated: false,
+        deployedAt: this.clock.now(),
+        steps,
+        ...(deployment.inspectorUrl ? { inspectorUrl: deployment.inspectorUrl } : {}),
+        ...(deployment.error ? { error: deployment.error } : {}),
+      };
+      this.record(workspaceDir, deployed);
+      if (!deployment.ok) {
+        throw new MegaError('INTERNAL', `Vercel deployment did not go live: ${deployment.error ?? deployment.readyState}`, {
+          url: deployment.url,
+          ...(deployment.inspectorUrl ? { inspectorUrl: deployment.inspectorUrl } : {}),
+        });
+      }
+      return deployed;
+    }
 
     // Simulated targets — or the absence of a runner — never shell out.
     const canRunReal = this.runner && !plan.simulated && plan.commands.length > 0;
@@ -190,13 +240,17 @@ export class DeployEngine {
       deployedAt: this.clock.now(),
       steps,
     };
-    // Record the deploy alongside the delivery.
+    this.record(workspaceDir, result);
+    return result;
+  }
+
+  /** Record the deploy alongside the delivery (best-effort). */
+  private record(workspaceDir: string, result: DeployResult): void {
     try {
       writeFileSync(join(workspaceDir, '.megaai-deploy.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
     } catch {
       /* recording is best-effort */
     }
-    return result;
   }
 }
 
@@ -236,3 +290,11 @@ export function createDeployTools(engine: DeployEngine): Tool[] {
   };
   return [plan, execute];
 }
+
+export {
+  collectDeployFiles,
+  deployToVercel,
+  type VercelDeployment,
+  type VercelDeployOptions,
+  type VercelFile,
+} from './vercel.js';

@@ -16,6 +16,7 @@ interface GoalDetail {
   files?: string[];
   contents?: GoalFile[];
   providers?: Array<{ kind: string; requests: number }>;
+  deployment?: { url: string; target: string; simulated: boolean; inspectorUrl?: string; error?: string };
   usage?: { requests: number; tokens: number; costUsd: number };
   error?: string;
 }
@@ -167,6 +168,42 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
       </div>
+
+      {goal.deployment && (
+        <div className="panel live">
+          {goal.deployment.simulated ? (
+            <>
+              <h2>Deployment was simulated</h2>
+              <div className="muted" style={{ fontSize: 13 }}>
+                <code>{goal.deployment.url}</code> does not exist — no Vercel token is saved, so the deploy step only
+                described what it would do. Add one under <Link href="/settings">Settings → Deployment</Link> and run
+                the goal again for a real link.
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>Live site</h2>
+              <a className="live-url" href={goal.deployment.url} target="_blank" rel="noreferrer noopener">
+                {goal.deployment.url} ↗
+              </a>
+              <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                Deployed to {goal.deployment.target}
+                {goal.deployment.inspectorUrl && (
+                  <>
+                    {' · '}
+                    <a href={goal.deployment.inspectorUrl} target="_blank" rel="noreferrer noopener">
+                      build log
+                    </a>
+                  </>
+                )}
+              </div>
+              {goal.deployment.error && (
+                <div className="msg err" style={{ marginLeft: 0, marginTop: 8 }}>{goal.deployment.error}</div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {shots.length > 0 && (
         <div className="panel">

@@ -26,12 +26,14 @@ interface SettingsView {
   fallbackChain: string[];
   planner: string;
   email: { enabled: boolean; from: string; to: string; apiUrl: string; apiKey: string; smtpHost: string };
+  deploy: { target: string; vercelToken: string; configured: boolean };
 }
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [emailKey, setEmailKey] = useState('');
+  const [vercelToken, setVercelToken] = useState('');
   const [fallback, setFallback] = useState('');
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -59,6 +61,7 @@ export default function SettingsPage() {
       setFallback(data.settings.fallbackChain.join(', '));
       setKeys({});
       setEmailKey('');
+      setVercelToken('');
       setLoadError('');
     } catch (err) {
       if (err instanceof SessionExpired) return; // redirecting to /login
@@ -107,6 +110,7 @@ export default function SettingsPage() {
         fallbackChain: fallback.split(',').map((s) => s.trim()).filter(Boolean),
         planner: settings.planner,
         email: { ...settings.email, apiKey: emailKey },
+        deploy: { target: settings.deploy?.target ?? 'vercel', vercelToken },
       };
       const res = await fetch('/api/settings', {
         method: 'POST',
@@ -223,6 +227,37 @@ export default function SettingsPage() {
               <input type="checkbox" checked={settings.email.enabled} onChange={(e) => setEmail({ enabled: e.target.checked })} />
               Enable email channel
             </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Deployment</h2>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          With a token saved, every finished goal is deployed for real and the goal page shows a link you can open.
+          Without one the deploy step only describes what it would do, and the URL it reports leads nowhere. Create a
+          token at <a href="https://vercel.com/account/tokens" target="_blank" rel="noreferrer noopener">vercel.com/account/tokens</a>{' '}
+          — scope it to your own account; MegaAI uploads the delivery&apos;s source files and nothing else.
+        </div>
+        <div className="grid2">
+          <div>
+            <label>Vercel token {settings.deploy?.configured && <span style={{ color: 'var(--ok)' }}>· saved</span>}</label>
+            <input
+              type="password"
+              value={vercelToken}
+              placeholder={settings.deploy?.vercelToken || 'not set — deploys will be simulated'}
+              onChange={(e) => setVercelToken(e.target.value)}
+            />
+          </div>
+          <div>
+            <label>Target</label>
+            <select
+              value={settings.deploy?.target ?? 'vercel'}
+              onChange={(e) => setSettings({ ...settings, deploy: { ...settings.deploy, target: e.target.value } })}
+            >
+              <option value="vercel">vercel (live URL)</option>
+              <option value="simulated">simulated (no deploy)</option>
+            </select>
           </div>
         </div>
       </div>

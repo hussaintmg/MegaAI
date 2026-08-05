@@ -4,7 +4,7 @@
 
 import { ObjectId, type Collection } from 'mongodb';
 import { getDb } from './db';
-import type { GoalFile, GoalProviderTally } from './delivery';
+import type { GoalDeployment, GoalFile, GoalProviderTally } from './delivery';
 
 export type GoalStatus = 'queued' | 'dispatched' | 'running' | 'completed' | 'failed' | 'error';
 
@@ -15,8 +15,10 @@ export interface GoalEvent {
 }
 
 export {
+  sanitizeDeployment,
   sanitizeGoalFiles,
   sanitizeProviderTallies,
+  type GoalDeployment,
   type GoalFile,
   type GoalProviderTally,
 } from './delivery';
@@ -34,6 +36,7 @@ export interface GoalDoc {
   files?: string[];
   contents?: GoalFile[];
   providers?: GoalProviderTally[];
+  deployment?: GoalDeployment;
   usage?: { requests: number; tokens: number; costUsd: number };
   error?: string;
 }

@@ -68,26 +68,76 @@ test('real target runs the injected runner and fails the deploy on a bad step', 
   }
 });
 
-test('vercel token is passed to the command but redacted in results', async () => {
+test('with a token, vercel deploys over the API and the token never reaches a shell', async () => {
+  // The old path shelled out to the Vercel CLI, which the runner does not have
+  // and the shell allowlist would refuse — so every "deployment" simulated and
+  // the URL it reported led nowhere.
   const { dir, cleanup } = ws();
   try {
-    const received: string[][] = [];
+    const shellCalls: string[][] = [];
+    let sentToken = '';
     const engine = new DeployEngine({
       tokens: { vercel: 'vercel_secret_token' },
       runner: async (command, args) => {
-        received.push([command, ...args]);
+        shellCalls.push([command, ...args]);
         return { exitCode: 0, stdout: '', stderr: '' };
       },
+      deployToVercel: async (options) => {
+        sentToken = options.token;
+        return {
+          id: 'dpl_1',
+          url: 'https://shop-abc.vercel.app',
+          inspectorUrl: 'https://vercel.com/x/dpl_1',
+          readyState: 'READY',
+          ok: true,
+          files: options.files.length,
+        };
+      },
     });
-    // The plan carries the token so the CLI authenticates…
-    const plan = engine.plan(dir, { target: 'vercel', appName: 'shop' });
-    assert.ok(plan.commands[0]!.args.includes('vercel_secret_token'));
-    // …but the redacted view and the executed step record never expose it.
-    assert.ok(engine.redactedCommands(plan).every((c) => !c.includes('vercel_secret_token')));
+
     const result = await engine.execute(dir, { target: 'vercel', appName: 'shop' });
-    assert.ok(received[0]!.includes('vercel_secret_token')); // real token reached the runner
-    assert.ok(result.steps.every((s) => !s.command.includes('vercel_secret_token'))); // redacted in the record
-    assert.ok(result.steps[0]!.command.includes('***'));
+    assert.equal(result.url, 'https://shop-abc.vercel.app', 'a URL that actually resolves');
+    assert.equal(result.simulated, false);
+    assert.equal(result.inspectorUrl, 'https://vercel.com/x/dpl_1');
+    assert.equal(sentToken, 'vercel_secret_token', 'the token reached the API client');
+    assert.deepEqual(shellCalls, [], 'nothing was shelled out');
+    assert.ok(
+      result.steps.every((s) => !s.command.includes('vercel_secret_token')),
+      'the token never appears in the recorded steps',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('a vercel build that fails is not reported as a live deployment', async () => {
+  const { dir, cleanup } = ws();
+  try {
+    const engine = new DeployEngine({
+      tokens: { vercel: 'tok' },
+      deployToVercel: async () => ({
+        id: 'dpl_2',
+        url: 'https://x.vercel.app',
+        inspectorUrl: 'https://vercel.com/x/dpl_2',
+        readyState: 'ERROR',
+        ok: false,
+        error: 'the Vercel build finished as ERROR',
+        files: 3,
+      }),
+    });
+    await assert.rejects(engine.execute(dir, { target: 'vercel' }), /did not go live/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('without a token the vercel target simulates, and says so', async () => {
+  const { dir, cleanup } = ws();
+  try {
+    const engine = new DeployEngine({ runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) });
+    const result = await engine.execute(dir, { target: 'vercel', appName: 'shop' });
+    assert.equal(result.simulated, true, 'no token means no deployment, however green it looks');
+    assert.match(engine.plan(dir, { target: 'vercel' }).description, /no token saved/);
   } finally {
     cleanup();
   }
