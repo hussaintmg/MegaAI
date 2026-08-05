@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { checkExecutor } from '@/lib/auth';
 import { goalsCollection, parseGoalId, pushGoalEvent } from '@/lib/goals';
+import { sanitizeGoalFiles, sanitizeProviderTallies } from '@/lib/delivery';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!checkExecutor(req)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -28,6 +29,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const update: Record<string, unknown> = { status, updatedAt: new Date() };
     if (typeof body.report === 'string') update.report = body.report.slice(0, 200_000);
     if (Array.isArray(body.files)) update.files = body.files.filter((f) => typeof f === 'string').slice(0, 300);
+    if (Array.isArray(body.contents)) update.contents = sanitizeGoalFiles(body.contents);
+    if (Array.isArray(body.providers)) update.providers = sanitizeProviderTallies(body.providers);
     if (body.usage && typeof body.usage === 'object') {
       const u = body.usage as Record<string, unknown>;
       update.usage = {

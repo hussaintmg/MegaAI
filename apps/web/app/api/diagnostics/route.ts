@@ -11,6 +11,8 @@ import { requireAdmin } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { githubConfig, refNote, resolveRef } from '@/lib/github';
 import { loadSettingsDoc, PROVIDER_KINDS } from '@/lib/settings';
+import { decryptSecret } from '@/lib/crypto';
+import { probeProvider } from '@/lib/probe';
 
 interface Check {
   name: string;
@@ -91,19 +93,37 @@ export async function GET() {
     }
   }
 
-  // AI providers
+  // AI providers — asked directly, not just counted. A stored-but-broken key
+  // is the difference between a real delivery and placeholder scaffolding.
   try {
     const settings = await loadSettingsDoc();
-    const configured = PROVIDER_KINDS.filter((kind) => settings.providers[kind]?.apiKeyEnc);
-    checks.push(
-      configured.length > 0
-        ? { name: 'AI providers', ok: true, detail: `keys stored for: ${configured.join(', ')}` }
-        : {
-            name: 'AI providers',
-            ok: false,
-            detail: 'no provider key saved yet — runs will fall back to the offline mock engine',
-          },
+    const configured = PROVIDER_KINDS.filter(
+      (kind) => settings.providers[kind]?.apiKeyEnc && settings.providers[kind]?.enabled !== false,
     );
+    if (configured.length === 0) {
+      checks.push({
+        name: 'AI providers',
+        ok: false,
+        detail:
+          'no provider key saved and enabled — every run will fall through to the offline mock and deliver placeholder files',
+      });
+    } else {
+      const probes = await Promise.all(
+        configured.map((kind) =>
+          probeProvider(kind, decryptSecret(settings.providers[kind]!.apiKeyEnc), settings.providers[kind]!.model),
+        ),
+      );
+      for (const probe of probes) {
+        checks.push({ name: `Provider: ${probe.kind}`, ok: probe.ok, detail: probe.detail });
+      }
+      if (!probes.some((p) => p.ok)) {
+        checks.push({
+          name: 'AI providers',
+          ok: false,
+          detail: 'no provider answered — runs will fall through to the offline mock and deliver placeholder files',
+        });
+      }
+    }
     checks.push({ name: 'Fallback order', ok: true, detail: settings.fallbackChain.join(' → ') });
   } catch (err) {
     checks.push({ name: 'AI providers', ok: false, detail: err instanceof Error ? err.message : String(err) });

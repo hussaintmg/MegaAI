@@ -69,6 +69,21 @@ export interface ProviderStatus {
   exhausted: boolean;
 }
 
+/** Who actually answered, and who refused — the record of a fallback. */
+export interface ProviderTally {
+  kind: ProviderKind;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface ProviderFailure {
+  kind: ProviderKind;
+  code: string;
+  message: string;
+  count: number;
+}
+
 export class AiSessionManager {
   readonly name = 'ai-sessions';
   readonly models: ModelRegistry;
@@ -83,6 +98,11 @@ export class AiSessionManager {
   private readonly clock: Clock;
   private readonly activeSessions = new Map<string, SessionLease>();
   private totalUsage = { inputTokens: 0, outputTokens: 0, requests: 0, estimatedCostUsd: 0 };
+  // Per-provider books. The totals alone cannot tell a real delivery from one
+  // the offline mock produced after every configured key failed, and that
+  // difference is the whole answer to "why is my site a placeholder?".
+  private readonly tallies = new Map<ProviderKind, ProviderTally>();
+  private readonly failures = new Map<ProviderKind, ProviderFailure>();
 
   constructor(options: SessionManagerOptions) {
     this.providers = options.providers;
@@ -204,6 +224,7 @@ export class AiSessionManager {
       } catch (err) {
         const error = MegaError.from(err);
         attempts.push(`${kind}: ${error.code}`);
+        this.recordFailure(kind, error);
         if (error.code === 'RATE_LIMITED') {
           this.limits.markExhausted(kind, this.cooldownMs);
           this.bus?.emit(Events.ProviderExhausted, { provider: kind, cooldownMs: this.cooldownMs }, 'ai');
@@ -233,10 +254,40 @@ export class AiSessionManager {
       response.usage.inputTokens,
       response.usage.outputTokens,
     );
+    const tally = this.tallies.get(response.provider) ?? {
+      kind: response.provider,
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    tally.requests += 1;
+    tally.inputTokens += response.usage.inputTokens;
+    tally.outputTokens += response.usage.outputTokens;
+    this.tallies.set(response.provider, tally);
+  }
+
+  private recordFailure(kind: ProviderKind, error: MegaError): void {
+    const previous = this.failures.get(kind);
+    this.failures.set(kind, {
+      kind,
+      code: error.code,
+      message: error.message,
+      count: (previous?.count ?? 0) + 1,
+    });
   }
 
   usage(): typeof this.totalUsage {
     return { ...this.totalUsage };
+  }
+
+  /** Completions each provider actually served, busiest first. */
+  providerTallies(): ProviderTally[] {
+    return [...this.tallies.values()].sort((a, b) => b.requests - a.requests).map((tally) => ({ ...tally }));
+  }
+
+  /** The last error from every provider that was tried and refused. */
+  providerFailures(): ProviderFailure[] {
+    return [...this.failures.values()].map((failure) => ({ ...failure }));
   }
 
   activeSessionCount(): number {

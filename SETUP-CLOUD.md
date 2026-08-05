@@ -88,9 +88,11 @@ secret:
    (the first login creates the admin account — there is no public signup).
 2. **Settings** → paste your Gemini / OpenRouter / Groq keys → Save.
    Keys are AES-256 encrypted before they reach MongoDB.
-3. **Dashboard** → type a goal → **Run goal**. Watch live events; the report
-   and file list appear when the runner finishes. The complete workspace is
-   attached to the Actions run as an artifact.
+3. **Dashboard** → type a goal → **Run goal**. Watch live events; when the
+   runner finishes, the **Delivery** panel lists every file, opens each one,
+   renders any HTML page as a live preview, and offers the whole thing as a
+   `.zip`. (The complete workspace is also attached to the Actions run as an
+   artifact.)
 4. **Users** → add access for anyone else (you set their password; you can
    reset or remove them any time).
 5. **Schedules** → recurring goals (the `schedule-tick.yml` cron drives them).
@@ -109,3 +111,9 @@ secret:
   seed the admin only while no users exist yet.
 - **Keys not used by runs** → check Settings shows the provider as
   `configured`, and its checkbox is ON, and it appears in the fallback order.
+- **The delivery is generic scaffolding, not what you asked for** → the run
+  fell through to the built-in offline mock, which writes a skeleton with your
+  goal's words pasted in. Such a run is now reported as **failed**, and the
+  goal page says which provider refused and why. **Settings → Run setup check**
+  calls each stored key live, so a rejected key, an exhausted quota, or a model
+  name your account cannot reach shows up before you spend a run on it.

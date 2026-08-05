@@ -17,5 +17,8 @@
     "paths": { "@/*": ["./*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // Tests import with explicit .ts specifiers (Node runs them directly, with
+  // type stripping), which the app's bundler resolution rejects. They are
+  // type-checked by tsconfig.test.json instead.
+  "exclude": ["node_modules", "**/*.test.ts"]
 }

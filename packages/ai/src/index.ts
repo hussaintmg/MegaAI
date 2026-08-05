@@ -11,6 +11,8 @@ export {
   type AcquireOptions,
   type SessionManagerOptions,
   type ProviderStatus,
+  type ProviderTally,
+  type ProviderFailure,
 } from './sessions.js';
 export { MockProvider, type MockProviderOptions } from './providers/mock.js';
 export { AnthropicProvider, type AnthropicProviderOptions } from './providers/anthropic.js';

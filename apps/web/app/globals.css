@@ -88,8 +88,34 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
 .provider-row .status.set { color: var(--ok); }
 .provider-row .status.unset { color: #64708a; }
 
+/* Delivery browser: file list beside the file itself. */
+.delivery { display: grid; grid-template-columns: 240px 1fr; gap: 12px; align-items: start; }
+.filelist { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.filelist button {
+  display: block; width: 100%; text-align: left; background: transparent; border: 0;
+  border-bottom: 1px solid var(--panel2); border-radius: 0; color: var(--muted);
+  padding: 7px 10px; font-size: 12.5px; cursor: pointer;
+}
+.filelist button:last-child { border-bottom: 0; }
+.filelist button:hover { background: var(--panel2); color: var(--text); }
+.filelist button.on { background: var(--panel2); color: var(--text); border-left: 2px solid var(--accent); }
+.filelist button .sz { float: right; font-size: 10.5px; color: #64708a; }
+.viewer { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; min-width: 0; }
+.viewer .bar {
+  display: flex; gap: 8px; align-items: center; padding: 7px 10px;
+  background: var(--panel2); border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.viewer .bar .path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer pre {
+  margin: 0; padding: 12px; max-height: 520px; overflow: auto;
+  font-size: 12.5px; white-space: pre; background: #0d1220;
+}
+.viewer iframe { display: block; width: 100%; height: 520px; border: 0; background: #fff; }
+
 @media (max-width: 760px) {
   .grid2 { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr 1fr; }
   .provider-row { grid-template-columns: 90px 1fr 1fr 40px; }
+  .delivery { grid-template-columns: 1fr; }
+  .filelist { max-height: 200px; }
 }
