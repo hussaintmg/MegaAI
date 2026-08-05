@@ -16,7 +16,9 @@ interface ProviderView {
   enabled: boolean;
   model: string;
   apiKey: string;
+  requestsPerMinute: number;
   configured: boolean;
+  inChain: boolean;
 }
 
 interface SettingsView {
@@ -97,6 +99,7 @@ export default function SettingsPage() {
           enabled: settings.providers[kind]?.enabled ?? true,
           model: settings.providers[kind]?.model ?? '',
           apiKey: keys[kind] ?? '',
+          requestsPerMinute: settings.providers[kind]?.requestsPerMinute ?? 0,
         };
       }
       const body = {
@@ -133,6 +136,7 @@ export default function SettingsPage() {
           <div className="muted" style={{ fontSize: 11 }}>PROVIDER</div>
           <div className="muted" style={{ fontSize: 11 }}>MODEL (optional)</div>
           <div className="muted" style={{ fontSize: 11 }}>API KEY</div>
+          <div className="muted" style={{ fontSize: 11 }}>REQ/MIN</div>
           <div className="muted" style={{ fontSize: 11 }}>ON</div>
         </div>
         {KINDS.map((kind) => {
@@ -142,6 +146,12 @@ export default function SettingsPage() {
               <div>
                 <strong>{LABELS[kind]}</strong>
                 <div className={`status ${p?.configured ? 'set' : 'unset'}`}>{p?.configured ? 'configured' : 'no key'}</div>
+                {p?.configured && !p.inChain && (
+                  <div className="status" style={{ color: 'var(--err)' }}>not in fallback order</div>
+                )}
+                {p?.configured && p.enabled === false && (
+                  <div className="status" style={{ color: 'var(--err)' }}>switched off</div>
+                )}
               </div>
               <input
                 type="text"
@@ -156,6 +166,14 @@ export default function SettingsPage() {
                 onChange={(e) => setKeys((prev) => ({ ...prev, [kind]: e.target.value }))}
               />
               <input
+                type="number"
+                min={0}
+                value={p?.requestsPerMinute || ''}
+                placeholder="auto"
+                title="Your plan's requests-per-minute allowance. Blank uses a safe free-tier default."
+                onChange={(e) => setProvider(kind, { requestsPerMinute: Number(e.target.value) || 0 })}
+              />
+              <input
                 type="checkbox"
                 checked={p?.enabled ?? true}
                 onChange={(e) => setProvider(kind, { enabled: e.target.checked })}
@@ -163,6 +181,11 @@ export default function SettingsPage() {
             </div>
           );
         })}
+        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+          A saved key is only used when its switch is on <em>and</em> it appears in the fallback order below.
+          Leave REQ/MIN blank unless you pay for a higher rate — the engine queues against it instead of
+          bursting past your limit and losing the run to a 429.
+        </div>
         <label>Fallback order (tried left to right; unconfigured providers are skipped)</label>
         <input type="text" value={fallback} onChange={(e) => setFallback(e.target.value)} placeholder="gemini, openrouter, groq, mock" />
         <label>Planner</label>

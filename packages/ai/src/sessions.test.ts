@@ -1,13 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ManualClock } from '@megaai/utils';
-import { MegaError } from '@megaai/types';
+import { MegaError, type CompletionResponse, type ModelCard, type ProviderKind } from '@megaai/types';
+import type { Provider } from '@megaai/contracts';
 import { LimitTracker } from './limits.js';
 import { AiSessionManager, ProviderRegistry } from './sessions.js';
 import { MockProvider } from './providers/mock.js';
 import { ModelRegistry } from './models.js';
 
 const REQUEST = { messages: [{ role: 'user' as const, content: 'hello' }] };
+
+// The manager now waits out rate limits with real timers. Tests inject an
+// instant sleep so a 429 case does not spend 15 seconds sitting still.
+const NO_WAIT = async (): Promise<void> => undefined;
+
+/** Refuses with a 429 for its first `failures` calls, then answers. */
+class FlakyProvider implements Provider {
+  calls = 0;
+  constructor(
+    readonly kind: ProviderKind,
+    private readonly failures: number,
+    private readonly retryAfterMs?: number,
+  ) {}
+  readonly name = 'flaky';
+  models(): ModelCard[] {
+    return [];
+  }
+  isConfigured(): boolean {
+    return true;
+  }
+  async complete(): Promise<CompletionResponse> {
+    this.calls += 1;
+    if (this.calls <= this.failures) {
+      throw new MegaError(
+        'RATE_LIMITED',
+        `${this.kind} rate limited`,
+        this.retryAfterMs ? { retryAfterMs: this.retryAfterMs } : {},
+      );
+    }
+    return {
+      text: 'ok',
+      provider: this.kind,
+      model: 'flaky-1',
+      stopReason: 'stop',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
+  }
+}
 
 test('limit tracker enforces rpm and daily tokens with cooldowns', () => {
   const clock = new ManualClock(0);
@@ -28,45 +67,134 @@ test('limit tracker enforces rpm and daily tokens with cooldowns', () => {
   assert.equal(limits.isExhausted('p'), false);
 });
 
-test('session manager falls through the chain on rate limits', async () => {
+test('a rate-limited provider is retried before anyone else is asked', async () => {
+  // One 429 used to end it: the provider was written off for a minute and the
+  // next thing in the chain answered — which, for a single-key setup, is the
+  // offline mock. A whole 14-request delivery was produced that way.
+  const registry = new ProviderRegistry();
+  const gemini = new FlakyProvider('gemini', 2);
+  registry.register(gemini);
+  registry.register(new MockProvider({ kind: 'mock' }));
+  const waits: number[] = [];
+  const sessions = new AiSessionManager({
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+    providers: registry,
+    limits: new LimitTracker(),
+    fallbackChain: ['gemini', 'mock'],
+  });
+
+  const response = await sessions.completeWithFallback(REQUEST);
+  assert.equal(response.provider, 'gemini', 'the real provider answered — the mock was never reached');
+  assert.equal(gemini.calls, 3, 'two refusals, then the call that worked');
+  assert.deepEqual(waits, [1_000, 2_000], 'backoff doubles between attempts');
+  assert.equal(sessions.providerTallies()[0]?.kind, 'gemini');
+});
+
+test('the wait honours the delay the provider itself asked for', async () => {
+  const registry = new ProviderRegistry();
+  registry.register(new FlakyProvider('gemini', 1, 27_000));
+  registry.register(new MockProvider({ kind: 'mock' }));
+  const waits: number[] = [];
+  const sessions = new AiSessionManager({
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+    providers: registry,
+    limits: new LimitTracker(),
+    fallbackChain: ['gemini', 'mock'],
+  });
+
+  const response = await sessions.completeWithFallback(REQUEST);
+  assert.equal(response.provider, 'gemini');
+  assert.deepEqual(waits, [27_000], 'Retry-After / RetryInfo beats the default backoff');
+});
+
+test('a wait longer than the budget falls through instead of stalling the run', async () => {
+  const registry = new ProviderRegistry();
+  registry.register(new FlakyProvider('gemini', 1, 600_000));
+  registry.register(new MockProvider({ kind: 'mock' }));
+  const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
+    providers: registry,
+    limits: new LimitTracker(),
+    fallbackChain: ['gemini', 'mock'],
+    rateLimitWaitMs: 60_000,
+  });
+  const response = await sessions.completeWithFallback(REQUEST);
+  assert.equal(response.provider, 'mock', 'a ten-minute wait is not worth blocking a delivery for');
+  assert.equal(sessions.limits.isExhausted('gemini'), true);
+});
+
+test('retries are bounded — a provider that never recovers still falls through', async () => {
+  const registry = new ProviderRegistry();
+  const gemini = new FlakyProvider('gemini', Number.POSITIVE_INFINITY);
+  registry.register(gemini);
+  registry.register(new MockProvider({ kind: 'mock' }));
+  const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
+    providers: registry,
+    limits: new LimitTracker(),
+    fallbackChain: ['gemini', 'mock'],
+    rateLimitRetries: 2,
+  });
+  const response = await sessions.completeWithFallback(REQUEST);
+  assert.equal(response.provider, 'mock');
+  assert.equal(gemini.calls, 3, 'the first call plus two retries');
+});
+
+test('the offline mock is never waited for', async () => {
+  // Waiting exists to protect a real delivery. Standing in a queue for the
+  // simulator would only delay placeholder output.
+  const registry = new ProviderRegistry();
+  registry.register(new FlakyProvider('mock', 1));
+  const waits: number[] = [];
+  const sessions = new AiSessionManager({
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+    providers: registry,
+    limits: new LimitTracker(),
+    fallbackChain: ['mock'],
+  });
+  await assert.rejects(sessions.completeWithFallback(REQUEST), /PROVIDER_UNAVAILABLE|All providers/);
+  assert.deepEqual(waits, []);
+});
+
+test('an exhausted provider is skipped, and eligible again after its cooldown', async () => {
   const clock = new ManualClock(0);
   const registry = new ProviderRegistry();
-  const primary = new MockProvider({ kind: 'primary', rateLimitAfter: 1 });
-  const backup = new MockProvider({ kind: 'backup' });
+  const primary = new FlakyProvider('primary', Number.POSITIVE_INFINITY);
   registry.register(primary);
-  registry.register(backup);
-
+  registry.register(new MockProvider({ kind: 'backup' }));
   const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
     providers: registry,
     models: new ModelRegistry([
-      { id: 'p-model', provider: 'primary', displayName: 'P', tier: 'balanced', contextWindow: 1, maxOutputTokens: 1, inputCostPerMTok: 0, outputCostPerMTok: 0 },
       { id: 'b-model', provider: 'backup', displayName: 'B', tier: 'balanced', contextWindow: 1, maxOutputTokens: 1, inputCostPerMTok: 0, outputCostPerMTok: 0 },
     ]),
     limits: new LimitTracker(clock),
     fallbackChain: ['primary', 'backup'],
+    rateLimitRetries: 0,
     clock,
   });
 
   const first = await sessions.completeWithFallback(REQUEST);
-  assert.equal(first.provider, 'primary');
-
-  // Second request rate-limits the primary → served by backup, primary cools down.
-  const second = await sessions.completeWithFallback(REQUEST);
-  assert.equal(second.provider, 'backup');
+  assert.equal(first.provider, 'backup');
   assert.equal(sessions.limits.isExhausted('primary'), true);
 
-  // While exhausted, requests skip the primary entirely (no attempt made).
-  const attemptsBefore = primary.requestsServed();
+  // While exhausted the primary is not called at all.
+  const before = primary.calls;
+  const second = await sessions.completeWithFallback(REQUEST);
+  assert.equal(second.provider, 'backup');
+  assert.equal(primary.calls, before);
+
+  // After the cooldown it is tried again, and the chain still recovers.
+  clock.advance(61_000);
   const third = await sessions.completeWithFallback(REQUEST);
   assert.equal(third.provider, 'backup');
-  assert.equal(primary.requestsServed(), attemptsBefore);
-
-  // After the cooldown the primary becomes eligible again: it is attempted
-  // (still rate-limited in this simulation), and the chain still recovers.
-  clock.advance(61_000);
-  const fourth = await sessions.completeWithFallback(REQUEST);
-  assert.equal(fourth.provider, 'backup');
-  assert.equal(primary.requestsServed(), attemptsBefore + 1);
+  assert.equal(primary.calls, before + 1);
 });
 
 test('refusals and hard provider failures also fall through', async () => {
@@ -75,6 +203,7 @@ test('refusals and hard provider failures also fall through', async () => {
   registry.register(new MockProvider({ kind: 'down', alwaysFail: 'PROVIDER_UNAVAILABLE' }));
   registry.register(new MockProvider({ kind: 'mock' }));
   const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
     providers: registry,
     limits: new LimitTracker(),
     fallbackChain: ['refuser', 'down', 'mock'],
@@ -87,6 +216,7 @@ test('when every provider fails the error lists the attempts', async () => {
   const registry = new ProviderRegistry();
   registry.register(new MockProvider({ kind: 'only', alwaysFail: 'RATE_LIMITED' }));
   const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
     providers: registry,
     limits: new LimitTracker(),
     fallbackChain: ['only'],
@@ -103,6 +233,7 @@ test('sessions carry leases and record usage', async () => {
   const registry = new ProviderRegistry();
   registry.register(new MockProvider());
   const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
     providers: registry,
     limits: new LimitTracker(),
     fallbackChain: ['mock'],
@@ -125,6 +256,7 @@ test('the books show who answered and who refused', async () => {
   registry.register(new MockProvider({ kind: 'gemini', alwaysFail: 'RATE_LIMITED' }));
   registry.register(new MockProvider({ kind: 'mock' }));
   const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
     providers: registry,
     limits: new LimitTracker(),
     fallbackChain: ['gemini', 'mock'],
@@ -145,8 +277,9 @@ test('the books show who answered and who refused', async () => {
   assert.equal(failures[0]?.kind, 'gemini');
   assert.equal(failures[0]?.code, 'RATE_LIMITED');
   assert.ok(failures[0]?.message.length > 0, 'the reason is kept, so the dashboard can show it');
-  // The second attempt is skipped by the cooldown, so the count stays at 1.
-  assert.equal(failures[0]?.count, 1);
+  // The first completion tries gemini five times (once plus four retries)
+  // before giving up; the second finds it cooling down and skips it entirely.
+  assert.equal(failures[0]?.count, 5, 'every refusal is counted, so a flapping key is visible');
 });
 
 test('a healthy provider leaves no failures behind', async () => {
@@ -154,6 +287,7 @@ test('a healthy provider leaves no failures behind', async () => {
   registry.register(new MockProvider({ kind: 'gemini' }));
   registry.register(new MockProvider({ kind: 'mock' }));
   const sessions = new AiSessionManager({
+    sleep: NO_WAIT,
     providers: registry,
     limits: new LimitTracker(),
     fallbackChain: ['gemini', 'mock'],

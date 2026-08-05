@@ -68,6 +68,51 @@ async function main() {
   console.log(`executor: goal = ${goal}`);
   await postEvent('engine', 'Booting the MegaAI engine on the runner');
 
+  // Print exactly what the platform sent, before the engine touches it.
+  // "gemini never answered" said nothing about the OpenRouter key that was
+  // also saved — and there was no way to tell whether the platform failed to
+  // send it, or the engine failed to use it. This line separates the two.
+  const chain = Array.isArray(settings.fallbackChain) && settings.fallbackChain.length > 0
+    ? settings.fallbackChain
+    : ['(platform sent no fallback order — the engine default applies)'];
+  const received = Object.entries(settings.providers ?? {}).map(([kind, p]) => {
+    const inChain = chain.includes(kind);
+    const flags = [
+      p?.apiKey ? 'key' : 'NO KEY',
+      p?.enabled === false ? 'OFF' : 'on',
+      inChain ? 'in chain' : 'NOT IN CHAIN',
+    ];
+    return `${kind} [${flags.join(', ')}]`;
+  });
+  const keyed = Object.entries(settings.providers ?? {}).filter(([, p]) => p?.apiKey);
+  const usable = keyed.filter(([kind, p]) => p?.enabled !== false && chain.includes(kind));
+  const settingsLine =
+    `Platform sent — order: ${chain.join(' → ')} · ` +
+    (received.length > 0 ? received.join(' · ') : 'no provider settings at all');
+  console.log(`executor: ${settingsLine}`);
+  await postEvent('settings', settingsLine);
+
+  // Name the mismatch rather than leaving it to be inferred from a later
+  // failure: a saved key that is off, or missing from the order, is silent.
+  for (const [kind, p] of keyed) {
+    if (p?.enabled === false) {
+      await postEvent('settings', `${kind} has a key but its switch is OFF in Settings — it will not be used.`);
+    } else if (!chain.includes(kind)) {
+      await postEvent(
+        'settings',
+        `${kind} has a key but is missing from the fallback order ("${chain.join(', ')}") — it will never be tried. Add it in Settings.`,
+      );
+    }
+  }
+  if (usable.length === 0) {
+    await postEvent(
+      'settings',
+      keyed.length > 0
+        ? 'Every saved key is either switched off or absent from the fallback order — this run has no usable provider.'
+        : 'The platform sent no API keys at all. Save one under Settings, then run the goal again.',
+    );
+  }
+
   // 2. Boot the engine with the platform's provider settings.
   const sdkUrl = new URL('../../packages/sdk/dist/index.js', import.meta.url);
   const { createMegaAI, Events } = await import(sdkUrl.href);
@@ -78,6 +123,7 @@ async function main() {
       enabled: p.enabled !== false,
       ...(p.apiKey ? { apiKey: p.apiKey } : {}),
       ...(p.model ? { model: p.model } : {}),
+      ...(p.requestsPerMinute ? { requestsPerMinute: p.requestsPerMinute } : {}),
     };
   }
 

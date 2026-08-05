@@ -60,6 +60,12 @@ export interface SessionManagerOptions {
   bus?: EventBus;
   logger?: Logger;
   clock?: Clock;
+  /** Total time one completion may spend waiting out rate limits (default 120s). */
+  rateLimitWaitMs?: number;
+  /** How many times to retry the same provider after a 429 (default 4). */
+  rateLimitRetries?: number;
+  /** Injected for tests, so waiting is instant. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ProviderStatus {
@@ -93,6 +99,10 @@ export class AiSessionManager {
   private readonly disabled: Set<ProviderKind>;
   private readonly maxTokens: number;
   private readonly cooldownMs: number;
+  /** How long one completion may spend waiting out rate limits, in total. */
+  private readonly rateLimitWaitMs: number;
+  private readonly rateLimitRetries: number;
+  private readonly sleep: (ms: number) => Promise<void>;
   private readonly bus?: EventBus;
   private readonly logger?: Logger;
   private readonly clock: Clock;
@@ -112,6 +122,9 @@ export class AiSessionManager {
     this.disabled = new Set(options.disabledProviders ?? []);
     this.maxTokens = options.maxTokens ?? 16_000;
     this.cooldownMs = options.rateLimitCooldownMs ?? 60_000;
+    this.rateLimitWaitMs = options.rateLimitWaitMs ?? 120_000;
+    this.rateLimitRetries = options.rateLimitRetries ?? 4;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.bus = options.bus;
     this.logger = options.logger;
     this.clock = options.clock ?? systemClock;
@@ -129,6 +142,12 @@ export class AiSessionManager {
     if (!provider || !provider.isConfigured()) return undefined;
     if (!this.limits.check(kind, estimatedTokens).allowed) return undefined;
     return provider;
+  }
+
+  /** Configured, enabled, and not the offline simulator. */
+  private isRealProvider(kind: ProviderKind): boolean {
+    if (kind === 'mock' || this.disabled.has(kind)) return false;
+    return this.providers.get(kind)?.isConfigured() === true;
   }
 
   acquire(options: AcquireOptions): AiSession {
@@ -192,11 +211,29 @@ export class AiSessionManager {
     const attempts: string[] = [];
 
     for (const kind of this.orderedChain(options.preferredProvider)) {
-      const provider = this.usableProvider(kind, estimated);
-      if (!provider) {
-        attempts.push(`${kind}: skipped`);
+      if (this.disabled.has(kind)) {
+        attempts.push(`${kind}: disabled`);
         continue;
       }
+      const configured = this.providers.get(kind);
+      if (!configured?.isConfigured()) {
+        attempts.push(`${kind}: not configured`);
+        continue;
+      }
+      // Stand in the queue rather than moving on. A real provider that is
+      // merely at its per-minute limit is worth waiting seconds for; the
+      // alternative further down this chain is the offline mock, whose output
+      // is not a delivery at all. The simulator is never worth waiting for.
+      const budget = this.isRealProvider(kind) ? this.rateLimitWaitMs : 0;
+      const reservation = await this.limits.reserve(kind, estimated, budget, this.sleep);
+      if (!reservation.allowed) {
+        attempts.push(`${kind}: ${reservation.reason ?? 'unavailable'}`);
+        continue;
+      }
+      if (reservation.waitedMs > 0) {
+        this.logger?.info('waited for provider capacity', { provider: kind, waitedMs: reservation.waitedMs });
+      }
+      const provider = configured;
       let model = request.model ?? (kind === options.preferredProvider ? options.preferredModel : undefined);
       if (!model) {
         try {
@@ -207,36 +244,65 @@ export class AiSessionManager {
           model = provider.models()[0]?.id;
         }
       }
-      try {
-        const response = await provider.complete({
-          ...request,
-          model,
-          maxTokens: request.maxTokens ?? this.maxTokens,
-        });
-        this.limits.recordRequest(kind, response.usage);
-        this.recordUsage(response);
-        this.bus?.emit(Events.CompletionFinished, {
-          provider: kind,
-          model: response.model,
-          usage: response.usage,
-        }, 'ai');
-        return response;
-      } catch (err) {
-        const error = MegaError.from(err);
-        attempts.push(`${kind}: ${error.code}`);
-        this.recordFailure(kind, error);
-        if (error.code === 'RATE_LIMITED') {
-          this.limits.markExhausted(kind, this.cooldownMs);
-          this.bus?.emit(Events.ProviderExhausted, { provider: kind, cooldownMs: this.cooldownMs }, 'ai');
+      // Retry the SAME provider on a rate limit before looking elsewhere.
+      // Falling straight through on the first 429 is what handed an entire
+      // 14-request run to the offline mock: one burst past a free-tier limit,
+      // and the real key was never asked again.
+      let spent = 0;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const response = await provider.complete({
+            ...request,
+            model,
+            maxTokens: request.maxTokens ?? this.maxTokens,
+          });
+          this.limits.recordTokens(kind, response.usage);
+          this.recordUsage(response);
+          this.bus?.emit(Events.CompletionFinished, {
+            provider: kind,
+            model: response.model,
+            usage: response.usage,
+          }, 'ai');
+          return response;
+        } catch (err) {
+          const error = MegaError.from(err);
+          this.recordFailure(kind, error);
+
+          if (error.code === 'RATE_LIMITED' && this.isRealProvider(kind)) {
+            // The provider usually says when to come back; otherwise back off
+            // exponentially from a second.
+            const asked = Number(error.details.retryAfterMs);
+            const wait = Number.isFinite(asked) && asked > 0 ? asked : Math.min(30_000, 1_000 * 2 ** attempt);
+            if (attempt < this.rateLimitRetries && spent + wait <= this.rateLimitWaitMs) {
+              this.logger?.warn('rate limited, waiting to retry the same provider', {
+                provider: kind,
+                attempt: attempt + 1,
+                waitMs: wait,
+              });
+              this.bus?.emit(Events.ProviderExhausted, { provider: kind, cooldownMs: wait, retrying: true }, 'ai');
+              await this.sleep(wait);
+              spent += wait;
+              // Take a fresh slot for the retry; the failed call used the last.
+              await this.limits.reserve(kind, estimated, this.rateLimitWaitMs - spent, this.sleep);
+              continue;
+            }
+          }
+
+          attempts.push(`${kind}: ${error.code}`);
+          if (error.code === 'RATE_LIMITED') {
+            this.limits.markExhausted(kind, this.cooldownMs);
+            this.bus?.emit(Events.ProviderExhausted, { provider: kind, cooldownMs: this.cooldownMs }, 'ai');
+          }
+          const canFallThrough =
+            error.retryable || error.code === 'PROVIDER_REFUSED' || error.code === 'INTERNAL';
+          if (!canFallThrough) throw error;
+          this.logger?.warn('provider failed, falling through chain', {
+            provider: kind,
+            code: error.code,
+            message: error.message,
+          });
+          break;
         }
-        const canFallThrough =
-          error.retryable || error.code === 'PROVIDER_REFUSED' || error.code === 'INTERNAL';
-        if (!canFallThrough) throw error;
-        this.logger?.warn('provider failed, falling through chain', {
-          provider: kind,
-          code: error.code,
-          message: error.message,
-        });
       }
     }
 

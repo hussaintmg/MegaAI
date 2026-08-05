@@ -5,6 +5,7 @@
 
 import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
+import { retryAfterFrom } from '../retry-after.js';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
 
@@ -73,9 +74,19 @@ export class GeminiProvider implements Provider {
       throw new MegaError('PROVIDER_UNAVAILABLE', `Gemini unreachable: ${String(err)}`);
     }
 
-    if (response.status === 429) throw new MegaError('RATE_LIMITED', 'Gemini rate limited');
     if (!response.ok) {
       const body = await response.text().catch(() => '');
+      if (response.status === 429) {
+        // Google puts the wait in the body as RetryInfo.retryDelay ("27s").
+        // Carrying it means the session manager waits that long and tries
+        // again, instead of writing the provider off for a flat minute.
+        const retryAfterMs = retryAfterFrom(response.headers, body);
+        throw new MegaError(
+          'RATE_LIMITED',
+          `Gemini rate limited${retryAfterMs ? ` — retry in ${Math.ceil(retryAfterMs / 1000)}s` : ''}`,
+          retryAfterMs ? { retryAfterMs } : {},
+        );
+      }
       const code = response.status >= 500 ? 'PROVIDER_UNAVAILABLE' : 'INTERNAL';
       throw new MegaError(code, `Gemini error ${response.status}: ${body.slice(0, 300)}`);
     }

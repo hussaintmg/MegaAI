@@ -18,6 +18,8 @@ interface ProviderLedger {
 const MINUTE = 60_000;
 const DAY = 24 * 60 * 60_000;
 
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 export interface LimitCheck {
   allowed: boolean;
   reason?: string;
@@ -26,8 +28,72 @@ export interface LimitCheck {
 
 export class LimitTracker {
   private readonly ledgers = new Map<ProviderKind, ProviderLedger>();
+  /** One queue per provider, so concurrent agents take turns instead of bursting. */
+  private readonly queues = new Map<ProviderKind, Promise<unknown>>();
 
   constructor(private readonly clock: Clock = systemClock) {}
+
+  /**
+   * Wait for a request slot, then take it.
+   *
+   * `check()` only ever answers "not right now", and every caller treated that
+   * as "use someone else" — so a single key at 10 requests/minute sent the
+   * eleventh task to whatever was next in the chain, which is the offline
+   * mock. Free-tier limits are a queue to stand in, not a provider outage.
+   *
+   * Calls are serialised per provider: without that, four agents all pass the
+   * check in the same millisecond and burst straight through the limit.
+   */
+  async reserve(
+    provider: ProviderKind,
+    estimatedTokens = 0,
+    maxWaitMs = 0,
+    sleep: (ms: number) => Promise<void> = defaultSleep,
+  ): Promise<LimitCheck & { waitedMs: number }> {
+    const previous = this.queues.get(provider) ?? Promise.resolve();
+    let release!: () => void;
+    this.queues.set(
+      provider,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    await previous.catch(() => undefined);
+
+    try {
+      let waitedMs = 0;
+      for (;;) {
+        const check = this.check(provider, estimatedTokens);
+        if (check.allowed) {
+          // Take the slot now. Recording only after the response would let
+          // every queued caller pass the check before any of them counted.
+          this.ledger(provider).requestTimestamps.push(this.clock.now());
+          return { ...check, waitedMs };
+        }
+        // Only the per-minute window is worth standing in line for. A daily
+        // token cap will not clear today, and "exhausted" is set after a
+        // provider has already had its retries — waiting again just doubles it.
+        if (check.reason !== 'requests-per-minute') return { ...check, waitedMs };
+        // +50ms so the window has genuinely rolled past when we re-check.
+        const wait = (check.retryAfterMs ?? 1_000) + 50;
+        // Budget against time we have actually spent, not against the clock:
+        // an injected clock does not advance, and this loop must still end.
+        if (waitedMs + wait > maxWaitMs) return { ...check, waitedMs };
+        await sleep(wait);
+        waitedMs += wait;
+      }
+    } finally {
+      release();
+    }
+  }
+
+  /** Tokens only — the request slot was already taken by `reserve`. */
+  recordTokens(provider: ProviderKind, usage?: TokenUsage): void {
+    if (!usage) return;
+    const ledger = this.ledger(provider);
+    this.rollDay(ledger, this.clock.now());
+    ledger.tokensToday += usage.inputTokens + usage.outputTokens;
+  }
 
   configure(provider: ProviderKind, limits: ProviderLimits): void {
     const ledger = this.ledger(provider);

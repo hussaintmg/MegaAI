@@ -14,6 +14,8 @@ export interface ProviderSetting {
   enabled: boolean;
   model: string;
   apiKeyEnc: string;
+  /** Your plan's allowance. 0 means "use the engine's free-tier default". */
+  requestsPerMinute?: number;
 }
 
 export interface SettingsDoc {
@@ -57,10 +59,13 @@ export function mergeSettings(existing: SettingsDoc, body: Record<string, unknow
       if (!raw || typeof raw !== 'object') continue;
       const p = raw as Record<string, unknown>;
       const prev = merged.providers[kind] ?? { enabled: true, model: '', apiKeyEnc: '' };
+      const rpm = Number(p.requestsPerMinute);
       merged.providers[kind] = {
         enabled: typeof p.enabled === 'boolean' ? p.enabled : prev.enabled,
         model: typeof p.model === 'string' ? p.model.slice(0, 200) : prev.model,
         apiKeyEnc: isMaskedOrEmpty(p.apiKey) ? prev.apiKeyEnc : encryptSecret(String(p.apiKey)),
+        // 0 or nonsense means "let the engine use its free-tier default".
+        requestsPerMinute: Number.isFinite(rpm) && rpm > 0 ? Math.min(10_000, Math.round(rpm)) : undefined,
       };
     }
   }
@@ -105,7 +110,10 @@ export function redactSettings(doc: SettingsDoc): Record<string, unknown> {
       enabled: p?.enabled ?? true,
       model: p?.model ?? '',
       apiKey: p ? maskSecret(p.apiKeyEnc) : '',
+      requestsPerMinute: p?.requestsPerMinute ?? 0,
       configured: Boolean(p?.apiKeyEnc),
+      // The dashboard shows why a stored key still does nothing.
+      inChain: doc.fallbackChain.includes(kind),
     };
   }
   return {
@@ -129,7 +137,12 @@ export function executorSettings(doc: SettingsDoc): Record<string, unknown> {
   for (const kind of PROVIDER_KINDS) {
     const p = doc.providers[kind];
     if (!p) continue;
-    providers[kind] = { enabled: p.enabled, model: p.model || undefined, apiKey: decryptSecret(p.apiKeyEnc) || undefined };
+    providers[kind] = {
+      enabled: p.enabled,
+      model: p.model || undefined,
+      apiKey: decryptSecret(p.apiKeyEnc) || undefined,
+      requestsPerMinute: p.requestsPerMinute || undefined,
+    };
   }
   return {
     providers,

@@ -82,7 +82,7 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
 .login-card h1 { text-align: center; margin-bottom: 6px; }
 .login-card .sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 
-.provider-row { display: grid; grid-template-columns: 110px 1fr 1fr 54px; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--panel2); }
+.provider-row { display: grid; grid-template-columns: 120px 1fr 1fr 74px 44px; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--panel2); }
 .provider-row:last-child { border-bottom: 0; }
 .provider-row .status { font-size: 11px; }
 .provider-row .status.set { color: var(--ok); }
@@ -124,7 +124,7 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
 @media (max-width: 760px) {
   .grid2 { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr 1fr; }
-  .provider-row { grid-template-columns: 90px 1fr 1fr 40px; }
+  .provider-row { grid-template-columns: 84px 1fr 1fr 60px 32px; }
   .delivery { grid-template-columns: 1fr; }
   .filelist { max-height: 200px; }
 }

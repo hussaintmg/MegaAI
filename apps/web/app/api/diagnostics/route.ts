@@ -97,15 +97,48 @@ export async function GET() {
   // is the difference between a real delivery and placeholder scaffolding.
   try {
     const settings = await loadSettingsDoc();
-    const configured = PROVIDER_KINDS.filter(
-      (kind) => settings.providers[kind]?.apiKeyEnc && settings.providers[kind]?.enabled !== false,
+    const stored = PROVIDER_KINDS.filter((kind) => settings.providers[kind]?.apiKeyEnc);
+
+    // A saved key does nothing on its own: it also has to be switched on and
+    // present in the fallback order. Both are silent when wrong — the run just
+    // reports that the *other* provider never answered.
+    for (const kind of stored) {
+      const provider = settings.providers[kind]!;
+      if (provider.enabled === false) {
+        checks.push({
+          name: `Provider: ${kind}`,
+          ok: false,
+          detail: 'a key is stored but the ON switch is off — this provider will never be used',
+        });
+      } else if (!settings.fallbackChain.includes(kind)) {
+        checks.push({
+          name: `Provider: ${kind}`,
+          ok: false,
+          detail: `a key is stored but "${kind}" is missing from the fallback order (${settings.fallbackChain.join(', ')}) — add it there or it will never be tried`,
+        });
+      }
+    }
+    for (const kind of settings.fallbackChain) {
+      if (kind !== 'mock' && PROVIDER_KINDS.includes(kind as (typeof PROVIDER_KINDS)[number]) && !stored.includes(kind as (typeof PROVIDER_KINDS)[number])) {
+        checks.push({
+          name: `Provider: ${kind}`,
+          ok: false,
+          detail: 'listed in the fallback order but no key is saved for it — it will be skipped',
+        });
+      }
+    }
+
+    const configured = stored.filter(
+      (kind) => settings.providers[kind]?.enabled !== false && settings.fallbackChain.includes(kind),
     );
     if (configured.length === 0) {
       checks.push({
         name: 'AI providers',
         ok: false,
         detail:
-          'no provider key saved and enabled — every run will fall through to the offline mock and deliver placeholder files',
+          stored.length > 0
+            ? 'every saved key is switched off or missing from the fallback order — every run will fall through to the offline mock and deliver placeholder files'
+            : 'no provider key saved — every run will fall through to the offline mock and deliver placeholder files',
       });
     } else {
       const probes = await Promise.all(

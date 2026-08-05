@@ -120,11 +120,15 @@ export function defaultConfig(): MegaConfig {
       fallbackChain: ['anthropic', 'openai', 'gemini', 'openrouter', 'groq', 'mock'],
       maxTokens: 16_000,
       providers: {
+        // Free-tier request rates, because that is what a first key is. The
+        // engine now queues against these instead of bursting past them and
+        // taking a 429 — set your real allowance in Settings if you pay for
+        // more. Guessing high costs a rate limit; guessing low costs seconds.
         anthropic: { enabled: true, model: 'claude-opus-5', requestsPerMinute: 50 },
         openai: { enabled: true, requestsPerMinute: 50 },
-        gemini: { enabled: true, model: 'gemini-2.5-flash', requestsPerMinute: 50 },
-        openrouter: { enabled: true, model: 'openai/gpt-4o-mini', requestsPerMinute: 50 },
-        groq: { enabled: true, model: 'llama-3.3-70b-versatile', requestsPerMinute: 50 },
+        gemini: { enabled: true, model: 'gemini-2.5-flash', requestsPerMinute: 10 },
+        openrouter: { enabled: true, model: 'openai/gpt-4o-mini', requestsPerMinute: 20 },
+        groq: { enabled: true, model: 'llama-3.3-70b-versatile', requestsPerMinute: 30 },
         mock: { enabled: true },
       },
     },

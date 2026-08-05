@@ -6,6 +6,7 @@
 
 import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
+import { retryAfterFrom } from '../retry-after.js';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
 
@@ -72,7 +73,15 @@ export class OpenAICompatProvider implements Provider {
       throw new MegaError('PROVIDER_UNAVAILABLE', `${this.name} unreachable: ${String(err)}`);
     }
 
-    if (response.status === 429) throw new MegaError('RATE_LIMITED', `${this.name} rate limited`);
+    if (response.status === 429) {
+      const body = await response.text().catch(() => '');
+      const retryAfterMs = retryAfterFrom(response.headers, body);
+      throw new MegaError(
+        'RATE_LIMITED',
+        `${this.name} rate limited${retryAfterMs ? ` — retry in ${Math.ceil(retryAfterMs / 1000)}s` : ''}`,
+        retryAfterMs ? { retryAfterMs } : {},
+      );
+    }
     if (response.status === 401 || response.status === 403) {
       throw new MegaError('PROVIDER_UNAVAILABLE', `${this.name} auth failed (${response.status})`);
     }
