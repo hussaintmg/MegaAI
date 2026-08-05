@@ -13,8 +13,8 @@
  *   Learn   — every outcome lands in the meta brain's learning store
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, writeFileSync, type Dirent } from 'node:fs';
+import { join, relative } from 'node:path';
 import type { JsonObject, ProjectRecord, TaskRecord, WorkflowRunRecord } from '@megaai/types';
 import { Events, MegaError } from '@megaai/types';
 import { type Clock, newId, slugify, systemClock } from '@megaai/utils';
@@ -38,6 +38,44 @@ import { AgentRuntime, type PreparedContext } from '@megaai/agents';
 import { GitEngine } from '@megaai/code';
 import type { AgentImplementation } from '@megaai/contracts';
 import type { MetaBrain } from '@megaai/meta-brain';
+
+/* ------------------------------------------------------------------ *
+ * Delivery report helpers
+ * ------------------------------------------------------------------ */
+
+/** Keep a markdown table cell from breaking the table. */
+function escapeCell(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+  return flat.length > 160 ? `${flat.slice(0, 157)}…` : flat || '—';
+}
+
+/** What the agent reported for a task — the summary it wrote, when there is one. */
+function taskSummary(task: TaskRecord): string {
+  const result = task.result;
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const summary = (result as JsonObject).summary;
+    if (typeof summary === 'string' && summary.trim()) return summary;
+  }
+  return 'done';
+}
+
+/** Every delivered file, workspace-relative (skips git and dependency noise). */
+function listWorkspaceFiles(dir: string, base = dir, out: string[] = []): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name === '.git' || entry.name === 'node_modules') continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) listWorkspaceFiles(full, base, out);
+    else out.push(relative(base, full));
+    if (out.length >= 300) return out;
+  }
+  return out.sort();
+}
 
 export interface OrchestratorOptions {
   config: MegaConfig;
@@ -322,6 +360,9 @@ export class Orchestrator {
     const project = await this.o.planning.getProject(projectId);
     const tasks = await this.o.planning.tasksOf(projectId);
     const usage = this.o.sessions.usage();
+    const files = listWorkspaceFiles(workspaceDir);
+    const failed = tasks.filter((task) => task.state === 'failed' || task.state === 'blocked');
+
     const lines = [
       `# MegaAI delivery report`,
       ``,
@@ -330,11 +371,27 @@ export class Orchestrator {
       `**Status:** ${project?.status ?? 'unknown'} (${Math.round((project?.progress ?? 0) * 100)}%)`,
       ``,
       `## Tasks`,
-      `| State | Task | Agent | Attempts |`,
-      `| --- | --- | --- | --- |`,
-      ...tasks.map(
-        (task) => `| ${task.state} | ${task.title} | ${task.agentKind} | ${task.attempts} |`,
-      ),
+      `| State | Task | Agent | Attempts | Outcome |`,
+      `| --- | --- | --- | --- | --- |`,
+      ...tasks.map((task) => {
+        const outcome = task.state === 'completed' ? taskSummary(task) : (task.error ?? '—');
+        return `| ${task.state} | ${task.title} | ${task.agentKind} | ${task.attempts} | ${escapeCell(outcome)} |`;
+      }),
+    ];
+
+    // A failed delivery must say what went wrong where the human is looking,
+    // not only in the logs.
+    if (failed.length > 0) {
+      lines.push(``, `## What went wrong`);
+      for (const task of failed) {
+        lines.push(`- **${task.title}** (${task.agentKind}, ${task.attempts} attempt(s)): ${task.error ?? 'no error recorded'}`);
+      }
+    }
+
+    lines.push(
+      ``,
+      `## Delivered files (${files.length})`,
+      ...(files.length > 0 ? files.map((file) => `- \`${file}\``) : ['_No files were written._']),
       ``,
       `## AI usage`,
       `- Requests: ${usage.requests}`,
@@ -342,7 +399,7 @@ export class Orchestrator {
       `- Estimated cost: $${usage.estimatedCostUsd.toFixed(4)}`,
       ``,
       `_Generated ${new Date(this.clock.now()).toISOString()} by MegaAI._`,
-    ];
+    );
     writeFileSync(join(workspaceDir, 'MEGAAI_REPORT.md'), `${lines.join('\n')}\n`, 'utf8');
 
     // Version the delivery: every finished workspace becomes a git repo with

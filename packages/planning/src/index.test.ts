@@ -73,6 +73,44 @@ test('failing a task retries until attempts run out, then blocks dependents', as
   assert.equal(progress.failed >= 1, true);
 });
 
+const THREE_PHASE: PlanSpec = {
+  projectName: 'Three-phase build',
+  domain: 'generic',
+  summary: 'test plan',
+  risks: [],
+  questionsForHuman: [],
+  phases: [
+    { name: 'A', tasks: [{ title: 'A1', description: '', agentKind: 'coding', complexity: 'standard' }] },
+    { name: 'B', tasks: [{ title: 'B1', description: '', agentKind: 'coding', complexity: 'standard' }] },
+    { name: 'C', tasks: [{ title: 'C1', description: '', agentKind: 'testing', complexity: 'standard' }] },
+  ],
+};
+
+test('blocking is transitive and settles the project as failed', async () => {
+  const planning = new PlanningService(new MemoryDatabase());
+  const { project } = await planning.materializePlan(THREE_PHASE, 'goal');
+
+  // Exhaust A1's attempts so it fails permanently.
+  const a1 = await planning.claimNextTask(project.id);
+  await planning.failTask(a1!.id, 'boom 1');
+  await planning.claimNextTask(project.id);
+  await planning.failTask(a1!.id, 'boom 2');
+  assert.equal((await planning.getTask(a1!.id))?.state, 'failed');
+
+  await planning.readyTasks(project.id);
+  const all = await planning.tasksOf(project.id);
+
+  // B1 blocks on the failed A1 — and C1 must block on the blocked B1 too.
+  // Without transitive blocking C1 stayed `pending` forever and the project
+  // never reached a terminal status.
+  assert.equal(all.find((t) => t.title === 'B1')?.state, 'blocked');
+  assert.equal(all.find((t) => t.title === 'C1')?.state, 'blocked', 'blocking must cascade past one level');
+  assert.match(all.find((t) => t.title === 'C1')?.error ?? '', /depends on/);
+
+  // Every task is terminal, so the project itself is settled — not "active".
+  assert.equal((await planning.getProject(project.id))?.status, 'failed');
+});
+
 test('project completes when every task completes', async () => {
   const planning = new PlanningService(new MemoryDatabase());
   const { project } = await planning.materializePlan(PLAN, 'goal');

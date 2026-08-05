@@ -145,15 +145,37 @@ export class PlanningService {
   async readyTasks(projectId: Id): Promise<TaskRecord[]> {
     const tasks = await this.tasksOf(projectId);
     const byId = new Map(tasks.map((task) => [task.id, task]));
+
+    // Blocking is transitive: a task waiting on a blocked task can never run
+    // either. Without this the cascade stopped one level deep, later phases sat
+    // in `pending` forever, and a doomed project never reached a terminal
+    // status — it just reported "active" with nothing happening.
+    const dead = (state: TaskRecord['state']) =>
+      state === 'failed' || state === 'cancelled' || state === 'blocked';
+    let changed = true;
+    let blockedAny = false;
+    while (changed) {
+      changed = false;
+      for (const task of tasks) {
+        if (task.state !== 'pending' && task.state !== 'ready') continue;
+        const deps = task.dependsOn.map((id) => byId.get(id)).filter((dep): dep is TaskRecord => Boolean(dep));
+        if (deps.some((dep) => dead(dep.state))) {
+          task.state = 'blocked';
+          task.error ??= 'Blocked: a task it depends on did not finish';
+          await this.saveTask(task);
+          changed = true;
+          blockedAny = true;
+        }
+      }
+    }
+    // Blocking can be what finally settles a project, so re-evaluate its
+    // status here too — otherwise a doomed run reports "active" forever.
+    if (blockedAny) await this.refreshProject(projectId);
+
     const ready: TaskRecord[] = [];
     for (const task of tasks) {
       if (task.state !== 'pending' && task.state !== 'ready') continue;
       const deps = task.dependsOn.map((id) => byId.get(id)).filter((dep): dep is TaskRecord => Boolean(dep));
-      if (deps.some((dep) => dep.state === 'failed' || dep.state === 'cancelled')) {
-        task.state = 'blocked';
-        await this.saveTask(task);
-        continue;
-      }
       if (deps.every((dep) => dep.state === 'completed')) ready.push(task);
     }
     return ready.sort(

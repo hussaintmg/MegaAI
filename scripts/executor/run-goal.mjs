@@ -121,11 +121,18 @@ async function main() {
   });
   await megaai.start();
 
+  // Say plainly when nothing is usable — a run with no provider fails on its
+  // first task, and "mock only" would have hidden the actual cause.
   const configured = megaai.sessions
     .providerStatus()
     .filter((p) => p.configured)
     .map((p) => p.kind);
-  await postEvent('providers', `Providers ready: ${configured.join(', ') || 'mock only'}`);
+  await postEvent(
+    'providers',
+    configured.length > 0
+      ? `Providers ready: ${configured.join(', ')}`
+      : 'No AI provider is configured — add an API key in Settings, or enable the offline mock. This run will fail.',
+  );
 
   megaai.bus.on(Events.TaskUpdated, (event) => {
     const task = event.payload?.task;

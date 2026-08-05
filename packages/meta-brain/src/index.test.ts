@@ -14,7 +14,33 @@ test('goal analysis detects domains and features', () => {
   assert.equal(analyzeGoal('A REST api for bookings').domain, 'api');
   assert.equal(analyzeGoal('Personal portfolio website').domain, 'website');
   assert.equal(analyzeGoal('Something entirely different').domain, 'generic');
-  assert.deepEqual(analyzeGoal('shop with auth and payment').features, ['auth', 'payment']);
+  assert.deepEqual(analyzeGoal('shop with auth and payment').features, ['auth', 'payments']);
+});
+
+test('domain keywords match whole words, never substrings', () => {
+  // Each of these used to be misdetected: "api" hides inside rapid/therapist/
+  // capital, and "shop" inside workshop and "coffee shop".
+  assert.equal(analyzeGoal('Build a rapid prototype of a note-taking tool').domain, 'generic');
+  assert.equal(analyzeGoal('Create a portfolio website for a therapist').domain, 'website');
+  assert.equal(analyzeGoal('Make a blog about capital markets').domain, 'website');
+  assert.equal(analyzeGoal('Design a workshop booking website').domain, 'website');
+});
+
+test('the strongest signal wins when a goal mentions several domains', () => {
+  // "landing page" (5) beats an incidental "shop" (1) — this exact goal used
+  // to produce a full ecommerce plan with a cart and a product catalog.
+  assert.equal(analyzeGoal('Build a simple landing page for a coffee shop').domain, 'website');
+  // …but a real store still wins, even though it also says "page".
+  assert.equal(analyzeGoal('An online store page with a shopping cart and checkout').domain, 'ecommerce');
+  assert.equal(analyzeGoal('A GraphQL microservice backend for orders').domain, 'api');
+});
+
+test('features are detected through their common variants', () => {
+  const features = analyzeGoal('store with authentication, subscriptions, an admin panel and reporting').features;
+  assert.ok(features.includes('auth'), 'authentication should map to auth');
+  assert.ok(features.includes('payments'), 'subscriptions should map to payments');
+  assert.ok(features.includes('admin'));
+  assert.ok(features.includes('reports'), 'reporting should map to reports');
 });
 
 test('generated plans are phased, typed and end with delivery work', () => {

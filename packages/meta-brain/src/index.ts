@@ -60,36 +60,108 @@ export interface GoalAnalysis {
   projectName: string;
 }
 
-const DOMAIN_KEYWORDS: Record<Exclude<Domain, 'generic'>, string[]> = {
-  ecommerce: ['ecommerce', 'e-commerce', 'shop', 'store', 'storefront', 'cart', 'checkout', 'product catalog'],
-  erp: ['erp', 'inventory', 'accounting', 'payroll', 'hr system', 'resource planning'],
-  api: ['api', 'backend', 'rest', 'graphql', 'microservice', 'endpoint'],
-  website: ['website', 'landing page', 'portfolio', 'blog', 'web site'],
+/**
+ * Domain signals, scored rather than first-match-wins.
+ *
+ * Two rules learned the hard way. Keywords match on WORD boundaries, never as
+ * substrings: "api" inside "rapid"/"therapist"/"capital" and "shop" inside
+ * "workshop"/"coffee shop" used to decide the whole plan. And each keyword
+ * carries a weight, because "landing page" says far more about intent than
+ * "shop" appearing incidentally — the highest total wins, so a goal mentioning
+ * several domains lands on the one it actually talks about most.
+ */
+const DOMAIN_KEYWORDS: Record<Exclude<Domain, 'generic'>, Array<[string, number]>> = {
+  ecommerce: [
+    ['ecommerce', 5],
+    ['e commerce', 5],
+    ['online store', 5],
+    ['storefront', 4],
+    ['product catalog', 4],
+    ['shopping cart', 4],
+    ['checkout', 3],
+    ['cart', 2],
+    ['store', 2],
+    ['shop', 1],
+  ],
+  erp: [
+    ['erp', 5],
+    ['resource planning', 5],
+    ['payroll', 4],
+    ['accounting', 3],
+    ['inventory', 3],
+    ['hr system', 4],
+  ],
+  api: [
+    ['api', 4],
+    ['rest api', 5],
+    ['graphql', 5],
+    ['microservice', 4],
+    ['microservices', 4],
+    ['backend', 3],
+    ['endpoint', 2],
+    ['endpoints', 2],
+  ],
+  website: [
+    ['website', 4],
+    ['web site', 4],
+    ['landing page', 5],
+    ['portfolio', 4],
+    ['blog', 3],
+    ['marketing site', 5],
+    ['homepage', 3],
+  ],
 };
 
-const FEATURE_KEYWORDS = [
-  'auth',
-  'login',
-  'payment',
-  'search',
-  'admin',
-  'dashboard',
-  'notifications',
-  'reports',
-  'multi-tenant',
-  'analytics',
-];
+/** Order used only to break exact score ties, so results stay deterministic. */
+const DOMAIN_PRIORITY: Array<Exclude<Domain, 'generic'>> = ['ecommerce', 'erp', 'api', 'website'];
+
+/** Lowercase, strip punctuation, collapse whitespace — "e-commerce" → "e commerce". */
+function normalizeGoal(goal: string): string {
+  return ` ${goal.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
+}
+
+/** True when `phrase` appears as whole words in an already-normalised goal. */
+function containsPhrase(normalized: string, phrase: string): boolean {
+  return normalized.includes(` ${phrase} `);
+}
+
+/**
+ * Feature name → the phrases that indicate it. Spelled out rather than
+ * stemmed, because word-boundary matching means "auth" alone would no longer
+ * catch "authentication" (and substring matching is what caused the domain
+ * misdetection this file used to have).
+ */
+const FEATURE_KEYWORDS: Record<string, string[]> = {
+  auth: ['auth', 'authentication', 'sign in', 'signin', 'sign up', 'signup', 'login', 'log in', 'accounts'],
+  payments: ['payment', 'payments', 'billing', 'stripe', 'subscription', 'subscriptions', 'invoice', 'invoices'],
+  search: ['search', 'filtering', 'filters'],
+  admin: ['admin', 'admin panel', 'back office', 'cms'],
+  dashboard: ['dashboard', 'dashboards'],
+  notifications: ['notification', 'notifications', 'alerts', 'emails'],
+  reports: ['report', 'reports', 'reporting'],
+  'multi-tenant': ['multi tenant', 'multitenant', 'multi tenancy', 'tenants'],
+  analytics: ['analytics', 'metrics', 'tracking'],
+};
 
 export function analyzeGoal(goal: string): GoalAnalysis {
-  const text = goal.toLowerCase();
+  const normalized = normalizeGoal(goal);
+
   let domain: Domain = 'generic';
-  for (const [candidate, keywords] of Object.entries(DOMAIN_KEYWORDS) as Array<[Domain, string[]]>) {
-    if (keywords.some((keyword) => text.includes(keyword))) {
+  let best = 0;
+  for (const candidate of DOMAIN_PRIORITY) {
+    let score = 0;
+    for (const [keyword, weight] of DOMAIN_KEYWORDS[candidate]) {
+      if (containsPhrase(normalized, keyword)) score += weight;
+    }
+    if (score > best) {
+      best = score;
       domain = candidate;
-      break;
     }
   }
-  const features = FEATURE_KEYWORDS.filter((feature) => text.includes(feature));
+
+  const features = Object.entries(FEATURE_KEYWORDS)
+    .filter(([, phrases]) => phrases.some((phrase) => containsPhrase(normalized, phrase)))
+    .map(([feature]) => feature);
   const projectName = truncate(goal.replace(/\s+/g, ' ').trim(), 60) || 'Untitled project';
   return { domain, features, projectName };
 }
