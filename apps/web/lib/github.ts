@@ -38,11 +38,14 @@ function ghHeaders(token: string): Record<string, string> {
 
 // Cached per server instance — the default branch rarely changes and this
 // saves an API call on every dispatch.
-const globalForRef = globalThis as unknown as { _megaaiDefaultBranch?: string };
+const globalForRef = globalThis as unknown as { _megaaiDefaultBranch?: string; _megaaiRefNote?: string };
 
-/** The branch to run workflows from: the override, else the repo default. */
-export async function resolveRef(config: GithubConfig): Promise<string> {
-  if (config.branch) return config.branch;
+/** The note explaining the last ref decision, when it was not the obvious one. */
+export function refNote(): string | undefined {
+  return globalForRef._megaaiRefNote;
+}
+
+async function defaultBranch(config: GithubConfig): Promise<string> {
   if (globalForRef._megaaiDefaultBranch) return globalForRef._megaaiDefaultBranch;
   const res = await fetch(`https://api.github.com/repos/${config.repo}`, { headers: ghHeaders(config.token) });
   if (!res.ok) {
@@ -58,6 +61,39 @@ export async function resolveRef(config: GithubConfig): Promise<string> {
   const branch = repo.default_branch || 'main';
   globalForRef._megaaiDefaultBranch = branch;
   return branch;
+}
+
+async function branchExists(config: GithubConfig, branch: string): Promise<boolean> {
+  const res = await fetch(
+    `https://api.github.com/repos/${config.repo}/branches/${encodeURIComponent(branch)}`,
+    { headers: ghHeaders(config.token) },
+  );
+  return res.ok;
+}
+
+/**
+ * The branch to run workflows from: the configured override when it actually
+ * exists, otherwise the repository's default branch.
+ *
+ * A stale `GITHUB_BRANCH` (say `main` on a repo whose default is named
+ * something else) used to fail every dispatch with a bare 422. Self-healing
+ * here beats making the operator hunt through environment variables — the
+ * substitution is reported so it is still visible in diagnostics.
+ */
+export async function resolveRef(config: GithubConfig): Promise<string> {
+  if (!config.branch) {
+    globalForRef._megaaiRefNote = undefined;
+    return defaultBranch(config);
+  }
+  if (await branchExists(config, config.branch)) {
+    globalForRef._megaaiRefNote = undefined;
+    return config.branch;
+  }
+  const fallback = await defaultBranch(config);
+  globalForRef._megaaiRefNote =
+    `GITHUB_BRANCH is set to "${config.branch}", which does not exist in ${config.repo} — ` +
+    `using the default branch "${fallback}" instead. Remove GITHUB_BRANCH to silence this.`;
+  return fallback;
 }
 
 export async function dispatchRunGoal(goalId: string): Promise<void> {

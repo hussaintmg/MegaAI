@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
 import { getDb } from '@/lib/db';
-import { githubConfig, resolveRef } from '@/lib/github';
+import { githubConfig, refNote, resolveRef } from '@/lib/github';
 import { loadSettingsDoc, PROVIDER_KINDS } from '@/lib/settings';
 
 interface Check {
@@ -52,10 +52,13 @@ export async function GET() {
     checks.push({ name: 'GitHub config', ok: true, detail: `repo ${config.repo}` });
     try {
       const ref = await resolveRef(config);
+      const note = refNote();
       checks.push({
         name: 'Workflow branch',
-        ok: true,
-        detail: config.branch ? `${ref} (from GITHUB_BRANCH)` : `${ref} (repository default)`,
+        // A substituted ref still works, but the operator should know their
+        // GITHUB_BRANCH is stale — surface it as something to fix.
+        ok: !note,
+        detail: note ?? (config.branch ? `${ref} (from GITHUB_BRANCH)` : `${ref} (repository default)`),
       });
       const res = await fetch(
         `https://api.github.com/repos/${config.repo}/actions/workflows/run-goal.yml`,
