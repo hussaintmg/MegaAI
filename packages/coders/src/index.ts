@@ -254,6 +254,12 @@ export interface CoderState {
   id: CoderId;
   /** Present and usable on this machine. */
   installed: boolean;
+  /**
+   * It is installed but will not start on this machine — a broken shim, a
+   * missing runtime. Different from being out of quota: waiting does not fix
+   * it, and trying it again inside the same run just burns handoffs.
+   */
+  brokenReason?: string;
   /** Parked until this moment because it ran out. */
   limitedUntil?: Timestamp;
   /** Why it is parked — shown rather than summarised away. */
@@ -330,10 +336,25 @@ export class CoderPool {
     return { ...state, sessions: { ...state.sessions } };
   }
 
+  /**
+   * This one is installed but cannot be started here.
+   *
+   * Seen for real: an npm shim Node refuses to run. The turn fails in
+   * milliseconds, the relay picks the same agent again because nothing about
+   * it changed, and four handoffs are gone in under a second without a single
+   * line of work being attempted.
+   */
+  markBroken(id: CoderId, reason: string): void {
+    const state = this.states.get(id);
+    if (!state || state.brokenReason) return;
+    state.brokenReason = reason;
+    this.emit('coder.broken', `${this.spec(id).name} cannot be started on this machine: ${reason}`, id);
+  }
+
   available(): CoderSpec[] {
     const now = this.clock.now();
     return [...this.states.values()]
-      .filter((state) => state.installed && (state.limitedUntil ?? 0) <= now)
+      .filter((state) => state.installed && !state.brokenReason && (state.limitedUntil ?? 0) <= now)
       .map((state) => this.spec(state.id))
       .sort((a, b) => a.rank - b.rank);
   }
@@ -392,6 +413,14 @@ export class CoderPool {
     const installed = [...this.states.values()].filter((state) => state.installed);
     if (installed.length === 0) {
       return { reason: 'no coding agent is installed on this machine — install Claude Code, Codex or OpenCode' };
+    }
+    const broken = installed.filter((state) => state.brokenReason);
+    if (broken.length === installed.length) {
+      return {
+        reason: `every coding agent on this machine fails to start (${broken
+          .map((state) => `${this.spec(state.id).name}: ${state.brokenReason}`)
+          .join('; ')}) — waiting will not fix this one`,
+      };
     }
     const limited = installed.filter((state) => (state.limitedUntil ?? 0) > this.clock.now());
     const soonest = limited.reduce<Timestamp | undefined>(
@@ -476,6 +505,13 @@ export async function runTurn(options: RunTurnOptions): Promise<TurnResult> {
     return { coder: spec.id, ok: false, limited: true, output: outcome.output, exitCode: outcome.exitCode };
   }
 
+  // 127 is the launcher saying it could not start the program at all. That is
+  // the agent being unusable on this machine, not the task being wrong, and
+  // retrying it inside the same run only burns handoffs.
+  if (outcome.exitCode === 127) {
+    pool.markBroken(spec.id, outcome.output.slice(-300).trim() || 'could not be started');
+  }
+
   const sessionId = spec.sessionIdFrom?.(outcome.output);
   if (sessionId) pool.rememberSession(spec.id, projectDir, sessionId);
 
@@ -531,6 +567,7 @@ export async function relayTask(options: RelayOptions): Promise<RelayResult> {
   const turns: TurnResult[] = [];
   const history = [...context.history];
 
+  const tried = new Set<CoderId>();
   for (let handoff = 0; handoff < maxHandoffs; handoff += 1) {
     const spec = pool.next(context.projectDir);
     if (!spec) {
@@ -542,6 +579,21 @@ export async function relayTask(options: RelayOptions): Promise<RelayResult> {
         reason: stuck?.reason ?? 'no coding agent is available',
       };
     }
+
+    // Handing the same agent the same task twice in a row achieves nothing —
+    // it failed for a reason that has not changed in the last second. The
+    // relay is for passing work *on*, and when there is nobody left to pass it
+    // to, the honest answer is that the line has run out.
+    if (tried.has(spec.id) && pool.available().every((other) => tried.has(other.id))) {
+      const stuck = pool.exhaustion();
+      return {
+        ok: false,
+        turns,
+        ...(stuck?.resumeAt ? { resumeAt: stuck.resumeAt } : {}),
+        reason: stuck?.reason ?? `every available coding agent has already tried this and failed`,
+      };
+    }
+    tried.add(spec.id);
 
     const brief = buildHandoffBrief({ ...context, history }, spec);
     const result = await runTurn({

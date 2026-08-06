@@ -173,7 +173,34 @@ const NPM_SHIM = [
 
 test('the shim gives up the script it was always going to run', () => {
   const target = resolveShimTarget(NPM_SHIM, 'C:\\Users\\me\\AppData\\Roaming\\npm');
-  assert.equal(target, 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js');
+  assert.deepEqual(target, {
+    path: 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js',
+    kind: 'js',
+  });
+});
+
+test('a shim that runs a native binary is not handed to node', () => {
+  // OpenCode ships an .exe rather than JavaScript. Putting node in front of it
+  // would break the one agent still standing when the others ran out of quota.
+  const shim = [
+    '@ECHO off',
+    'SETLOCAL',
+    'CALL :find_dp0',
+    'IF EXIST "%dp0%\\node.exe" ( SET "_prog=%dp0%\\node.exe" ) ELSE ( SET "_prog=node" )',
+    'endLocal & goto #_undefined_# 2>NUL || "%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe" %*',
+  ].join('\r\n');
+
+  const target = resolveShimTarget(shim, 'C:\\npm');
+  assert.deepEqual(target, { path: 'C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe', kind: 'exe' });
+
+  const plan = planSpawn('C:\\npm\\opencode.cmd', ['run', 'x'], {
+    platform: 'win32',
+    readShim: () => shim,
+    nodePath: 'C:\\node.exe',
+    dirname: () => 'C:\\npm',
+  });
+  assert.equal(plan.file, 'C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe');
+  assert.deepEqual(plan.args, ['run', 'x'], 'and its arguments are not shifted along by a script path');
 });
 
 test('a .cmd is unwrapped into node + script rather than spawned', () => {

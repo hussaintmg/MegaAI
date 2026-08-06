@@ -179,9 +179,15 @@ export class NodeAgent {
     }
     if (this.stopping) return decision;
 
-    while (this.running.size < decision.concurrency) {
+    // Bounded, because a claim that ends in a park still costs a read and a
+    // write. Eight tasks in one project folder used to be claimed and parked
+    // one after another every single tick — a lot of noise and churn to
+    // rediscover that the folder is busy.
+    let claims = 0;
+    while (this.running.size < decision.concurrency && claims < decision.concurrency * 2) {
       const task = await this.mesh.claimNext(this.id);
       if (!task) break;
+      claims += 1;
       await this.begin(task);
     }
     return decision;

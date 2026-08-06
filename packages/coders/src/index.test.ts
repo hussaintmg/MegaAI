@@ -282,3 +282,40 @@ test('asking for a turn with nobody available explains itself instead of throwin
     /every coding agent is out of quota/,
   );
 });
+
+/* ---------------- an agent that cannot start ---------------- */
+
+test('an agent that will not start is set aside, not tried again and again', async () => {
+  // Seen for real: a shim Node refuses to run. The turn failed in
+  // milliseconds, the relay picked the same agent again because nothing about
+  // it had changed, and four handoffs were gone in under a second without one
+  // line of work being attempted.
+  const { p } = pool();
+  const { launcher, calls } = scripted([
+    { exitCode: 1, output: 'usage limit reached, resets at 2026-08-06T14:00:00Z' },
+    { exitCode: 127, output: '[megaai] could not start opencode.cmd: EINVAL' },
+    { exitCode: 0, output: 'Done.' },
+  ]);
+
+  const result = await relayTask({ pool: p, launcher, context: { ...CONTEXT, history: [] } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.turns.map((t) => t.coder), ['claude', 'codex', 'opencode']);
+  assert.equal(calls.length, 3, 'each agent was given exactly one go');
+  assert.equal(p.state('codex').brokenReason !== undefined, true);
+  assert.equal(p.next()?.id, 'opencode', 'and the broken one is out of the running');
+});
+
+test('when every agent is broken, waiting is not offered as the answer', async () => {
+  const { p } = pool();
+  const { launcher } = scripted([
+    { exitCode: 127, output: 'could not start' },
+    { exitCode: 127, output: 'could not start' },
+    { exitCode: 127, output: 'could not start' },
+  ]);
+
+  const result = await relayTask({ pool: p, launcher, context: { ...CONTEXT, history: [] } });
+  assert.equal(result.ok, false);
+  assert.equal(result.resumeAt, undefined, 'no reset time, because no reset would help');
+  assert.match(result.reason ?? '', /fails to start/);
+  assert.match(result.reason ?? '', /waiting will not fix this one/);
+});

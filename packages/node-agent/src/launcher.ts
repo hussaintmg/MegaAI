@@ -100,15 +100,25 @@ export function detectCoders(
  * Returns nothing if the shim does not look like npm's — better to fall back
  * than to spawn something guessed.
  */
-export function resolveShimTarget(contents: string, shimDir: string): string | undefined {
-  // Take the last .js mentioned: earlier lines reference node.exe and the
-  // shim's own directory, and the entry point is on the exec line at the end.
-  const matches = [...contents.matchAll(/"([^"]*?\.[cm]?js)"/g)].map((match) => match[1] ?? '');
-  const target = matches[matches.length - 1];
+export interface ShimTarget {
+  path: string;
+  /** `js` needs node in front of it; `exe` is run on its own. */
+  kind: 'js' | 'exe';
+}
+
+export function resolveShimTarget(contents: string, shimDir: string): ShimTarget | undefined {
+  // Not every shim points at JavaScript. OpenCode ships a native binary, so
+  // its shim runs an .exe — assuming node in front of everything would break
+  // exactly the agent that was left when the others ran out.
+  const matches = [...contents.matchAll(/"([^"]*?\.(?:[cm]?js|exe))"/gi)].map((match) => match[1] ?? '');
+  // The last mention is the exec line; earlier ones are node.exe probes, which
+  // are the shim's plumbing rather than the program.
+  const target = [...matches].reverse().find((candidate) => !/[\\/]node\.exe$/i.test(candidate));
   if (!target) return undefined;
-  // %dp0% is the shim's own folder, with a trailing separator of its own.
+
+  // %dp0% is the shim's own folder, and carries its own trailing separator.
   const expanded = target.replace(/%~?dp0%[\\/]*/gi, `${shimDir}\\`).replace(/\\{2,}/g, '\\');
-  return expanded;
+  return { path: expanded, kind: /\.exe$/i.test(expanded) ? 'exe' : 'js' };
 }
 
 /* ------------------------------------------------------------------ *
@@ -164,7 +174,9 @@ export function planSpawn(
         '.exe is on PATH avoids it.',
     };
   }
-  return { file: options.nodePath ?? process.execPath, args: [target, ...args] };
+  return target.kind === 'exe'
+    ? { file: target.path, args }
+    : { file: options.nodePath ?? process.execPath, args: [target.path, ...args] };
 }
 
 /**
