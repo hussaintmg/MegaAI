@@ -233,7 +233,8 @@ bugs the training exposed: **[docs/TRAINED-MODELS.md](./docs/TRAINED-MODELS.md)*
 | Execution | `memory` · `policy` · `planning` · `workflow` · `tools` · `actions` · `prompt` · `context` |
 | Automation | `code` (git) · `browser` (Playwright) · `deploy` (approval-gated) · `comm` (channels + email + notifications) · `vision` (UI/responsive testing) · `desktop` (mouse/keyboard + element detection) · `crm` (clients/leads/invoices) · `jobs` (recurring) |
 | Intelligence | `agents` (14 kinds) · `meta-brain` (template + model planning) · `orchestrator` · `models` (trainable ML pack) |
-| Surface | `sdk` · `apps/cli` · `apps/server` |
+| Your machines | `mesh` (one durable queue across laptop, phone and cloud) · `node-agent` (the laptop agent: resource guard, crash-resume) · `coders` (drives Claude Code / Codex / OpenCode and hands work between them as quotas run out) |
+| Surface | `sdk` · `apps/cli` · `apps/server` · `apps/node` · `apps/web` |
 
 ## Extending MegaAI
 
@@ -267,29 +268,46 @@ distributed workers, and the plugin marketplace.
 ## Development
 
 ```bash
-npm run build     # tsc -b across all 34 workspaces
-npm test          # build + 133 tests (node:test, all offline)
+npm run build     # tsc -b across all 39 workspaces
+npm test          # build + 312 tests (node:test, all offline)
 npm run demo      # end-to-end smoke test
 npm run clean     # remove build output
 ```
 
+### A dependency advisory that cannot be fixed yet
+
+`npm audit` reports two high findings for `adm-zip` reached through
+`onnxruntime-node`, an *optional* dependency of `@megaai/models`. There is no
+release of `onnxruntime-node` that uses a patched `adm-zip`, so `npm audit fix`
+reports a fix and then changes nothing, and forcing it with an override means
+regenerating the lockfile — which drops the platform binaries Windows and
+Vercel need. It is left alone deliberately, and this is why that is
+defensible: `adm-zip` is used only by `onnxruntime-node`'s install script, to
+unpack an archive it fetched from Microsoft's own CDN over HTTPS. MegaAI never
+calls it, and nothing reaches it at runtime. It will clear when
+`onnxruntime-node` updates.
+
 ## Status
 
-Phase 1 (Foundation) and Phase 2 (Execution) are complete. Phase 3
-(Automation) is essentially complete — the code engine (git-versioned
-deliveries), real build pipelines and test execution, browser automation, an
-approval-gated deployment engine, a communication engine with native email
-(SMTP + HTTP-API transports) and notifications, the vision/UI testing engine
-(real headless Chromium), a trainable models pack, browser-backed desktop
-automation (element detection + mouse/keyboard), a CRM engine (clients, leads
-scored by the trained model, activities, invoices), and recurring scheduled
-jobs are all in and tested. Phase 4 has begun with model-backed planning
-(`megaai run "…" --model-planner`). See the [roadmap](./ROADMAP.md) for
-what's next (native desktop/OCR, deeper vision, semantic memory, distributed
-workers, the plugin marketplace) — all building on the contracts already in
-place.
+Phases 1–3 are complete: the foundation, the execution layer and the
+automation layer (git-versioned deliveries, real build pipelines and test
+execution, browser automation, approval-gated deployment, email and
+notifications, the vision/UI testing engine on real headless Chromium, a
+trainable models pack, desktop automation, a CRM engine and recurring jobs).
 
-**34 workspaces (32 packages + 2 apps) · 133 tests · fully offline demo.**
+Work since then has been about making MegaAI run on **your** machines rather
+than only in a cloud job. There is now one durable queue shared by the laptop,
+the phone and the cloud, and an agent that lives on your laptop: it stays out
+of your way while you are using the machine, drains the backlog when you walk
+away, stops when the machine gets hot or the battery gets low, survives a
+reboot as the same node, and drives Claude Code, Codex and OpenCode in turn —
+handing the work on with full context each time one runs out of quota, and
+parking it until the earliest reset when they all do. See
+[docs/LAPTOP-AGENT.md](./docs/LAPTOP-AGENT.md) to set it up, and
+[docs/DISTRIBUTED-PLAN.md](./docs/DISTRIBUTED-PLAN.md) for where it is going
+(the phone node, live logs in the dashboard, voice and image input).
+
+**39 workspaces (35 packages + 4 apps) · 312 tests · fully offline demo.**
 
 ## License
 
