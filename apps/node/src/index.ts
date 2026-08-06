@@ -150,7 +150,17 @@ async function run(config: NodeConfig): Promise<void> {
 
   const { store, close, where } = await openStore(config);
   const mesh = new Mesh({ store, onEvent: (event) => log(dim(event.message)) });
-  const { agent, found } = buildAgent(config, mesh, log);
+  const { agent, found, probe } = buildAgent(config, mesh, log);
+
+  // Wait for the machine probe before the first reading, for the same reason
+  // `status` does: on Windows it is a PowerShell that compiles a P/Invoke
+  // before its first line, so starting immediately makes the opening log line
+  // announce "this machine cannot report idle time" on a machine that reports
+  // it perfectly well ten seconds later. It corrects itself, but the first
+  // thing you read should not be wrong.
+  if (!(await waitForProbe(probe, 10_000))) {
+    log(yellow('the machine probe has not reported — falling back to judging activity by CPU load'));
+  }
 
   const node = await agent.start();
   say(`${bold('MegaAI')} is running as ${bold(node.name)} — queue: ${where}`);
