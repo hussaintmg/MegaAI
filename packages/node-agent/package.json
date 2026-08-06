@@ -11,9 +11,14 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
-  "scripts": { "build": "tsc -b" },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
   "dependencies": {
+    "@megaai/blueprint": "0.1.0",
     "@megaai/coders": "0.1.0",
     "@megaai/mesh": "0.1.0",
     "@megaai/types": "0.1.0",

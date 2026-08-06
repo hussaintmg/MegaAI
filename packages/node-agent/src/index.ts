@@ -13,6 +13,8 @@
  *   `state`      the node's identity and its sessions, across reboots
  *   `agent`      the loop: look, report, take work, keep the lease alive
  *   `coder-task` the task kind that hands work down the line of agents
+ *   `plan-task`  the one that plans a goal and keeps the others fed
+ *   `gui`        opening real applications and driving them with the mouse
  *   `autostart`  making it come back on its own after a restart
  */
 
@@ -22,4 +24,6 @@ export * from './launcher.js';
 export * from './state.js';
 export * from './agent.js';
 export * from './coder-task.js';
+export * from './plan-task.js';
+export * from './gui.js';
 export * from './autostart.js';

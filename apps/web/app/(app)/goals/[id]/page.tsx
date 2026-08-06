@@ -5,6 +5,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, SessionExpired } from '@/lib/client';
 import type { GoalFile } from '@/lib/delivery';
 import { buildPreview, isHtml } from '@/lib/preview';
+import type { GoalRun } from '@/lib/goal-run';
 
 interface GoalDetail {
   _id: string;
@@ -32,6 +33,7 @@ function formatBytes(bytes: number): string {
 export default function GoalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [goal, setGoal] = useState<GoalDetail | null>(null);
+  const [run, setRun] = useState<GoalRun | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [retrying, setRetrying] = useState(false);
@@ -41,8 +43,9 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
 
   const load = useCallback(async () => {
     try {
-      const data = await apiGet<{ goal: GoalDetail }>(`/api/goals/${id}`);
+      const data = await apiGet<{ goal: GoalDetail; run?: GoalRun }>(`/api/goals/${id}`);
       setGoal(data.goal);
+      setRun(data.run ?? null);
       setLoadError('');
     } catch (err) {
       if (err instanceof SessionExpired) return; // redirecting to /login
@@ -168,6 +171,108 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
       </div>
+
+      {run && (
+        <div className="panel">
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <h2 style={{ margin: 0 }}>{run.plan ? run.plan.projectName : 'Planning'}</h2>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {run.done}/{run.total} pieces
+            </span>
+          </div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{run.headline}</div>
+          {run.projectDir && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              <code>{run.projectDir}</code>
+            </div>
+          )}
+
+          {run.plan && (
+            <>
+              <p style={{ marginTop: 12, marginBottom: 6 }}>{run.plan.summary}</p>
+              {run.plan.stack.length > 0 && (
+                <div className="muted" style={{ fontSize: 12 }}>{run.plan.stack.join(' · ')}</div>
+              )}
+              {run.plan.additions.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <b style={{ fontSize: 13 }}>Added, because you would have wanted it</b>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                    {run.plan.additions.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {run.plan.decisions.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <b style={{ fontSize: 13 }}>Decided for you</b>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                    {run.plan.decisions.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {run.plan.risks.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <b style={{ fontSize: 13 }}>Watch out for</b>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                    {run.plan.risks.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
+          {run.pieces.length > 0 && (
+            <table style={{ marginTop: 14 }}>
+              <thead>
+                <tr>
+                  <th>Piece</th>
+                  <th>State</th>
+                  <th>Written by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {run.pieces.map((piece) => (
+                  <tr key={piece.taskId}>
+                    <td>
+                      {piece.surface && <span className="chip">{piece.surface}</span>}{' '}
+                      {piece.title.split(' · ').slice(-1)[0]}
+                      {piece.files.length > 0 && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                          {piece.files.slice(0, 4).join(', ')}
+                          {piece.files.length > 4 && ` +${piece.files.length - 4}`}
+                        </div>
+                      )}
+                      {piece.error && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{piece.error}</div>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`chip ${piece.state}`}>{piece.state}</span>
+                      {piece.waitingFor && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{piece.waitingFor}</div>
+                      )}
+                    </td>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {piece.coders.length > 0 ? piece.coders.join(' → ') : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {run.repairs.length > 0 && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+              The plan needed fixing before it could be used: {run.repairs.join('; ')}
+            </div>
+          )}
+        </div>
+      )}
 
       {goal.deployment && (
         <div className="panel live">

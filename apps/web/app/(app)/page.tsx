@@ -16,6 +16,7 @@ interface GoalRow {
 export default function DashboardPage() {
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [goal, setGoal] = useState('');
+  const [folder, setFolder] = useState('');
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -46,15 +47,21 @@ export default function DashboardPage() {
       const res = await fetch('/api/goals', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ goal: goal.trim() }),
+        body: JSON.stringify({ goal: goal.trim(), ...(folder.trim() ? { projectDir: folder.trim() } : {}) }),
       });
-      const data = (await res.json()) as { goal?: GoalRow; error?: string };
+      const data = (await res.json()) as { goal?: GoalRow; error?: string; note?: string };
       if (!res.ok) {
         setMessage({ ok: false, text: data.error ?? 'failed to submit' });
-      } else if (data.goal?.status === 'error') {
-        setMessage({ ok: false, text: data.goal.error ?? 'dispatch failed — check Settings' });
+      } else if (data.note) {
+        // Queued, but nothing can pick it up yet. Saying so now beats an empty
+        // page in ten minutes.
+        setMessage({ ok: false, text: data.note });
+        setGoal('');
       } else {
-        setMessage({ ok: true, text: 'Dispatched — the GitHub Actions runner is on it.' });
+        setMessage({
+          ok: true,
+          text: 'Handed over — it gets planned first, then Claude Code, Codex and OpenCode build it.',
+        });
         setGoal('');
       }
       await load();
@@ -81,15 +88,26 @@ export default function DashboardPage() {
 
       <div className="panel">
         <h2>New goal</h2>
+        <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+          A planner works out what it needs — database, backend, frontend, design, motion, security — and then your
+          own coding agents write it: Claude Code, Codex and OpenCode, several pieces at a time. Nothing here writes
+          code on their behalf. <Link href="/machines">Your machines</Link> do the work.
+        </div>
         <form onSubmit={submit}>
           <textarea
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             placeholder='e.g. "Build this client a complete ecommerce store: catalog, cart, checkout, auth"'
           />
+          <input
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            placeholder="Project folder on the machine (optional) — e.g. C:/projects/shop"
+            style={{ marginTop: 8 }}
+          />
           <div className="row" style={{ marginTop: 10 }}>
             <button type="submit" disabled={busy || goal.trim().length < 3}>
-              {busy ? 'Dispatching…' : 'Run goal'}
+              {busy ? 'Handing over…' : 'Run goal'}
             </button>
             {message && <span className={`msg ${message.ok ? 'ok' : 'err'}`}>{message.text}</span>}
           </div>

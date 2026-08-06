@@ -62,6 +62,9 @@ export interface MeshTaskDoc {
   waitingFor?: string;
 }
 
+/** The states that still need something to happen to them. */
+export const LIVE_TASK_STATES: TaskState[] = ['pending', 'claimed', 'running'];
+
 /** A node unheard from for this long is shown as offline. */
 export const OFFLINE_AFTER_MS = 45_000;
 
@@ -188,6 +191,70 @@ export function buildTask(input: NewTaskRequest): BuiltTask {
       priority: 0,
       attempts: 0,
       maxAttempts: 3,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * A goal, rather than a task
+ * ------------------------------------------------------------------ */
+
+export interface NewGoalRequest {
+  goal: string;
+  /** Optional: a phone has no idea what the folders on the laptop are called. */
+  projectDir?: string;
+  /** How many coding agents may work on it at once. */
+  parallel?: number;
+  verifyCommand?: string;
+}
+
+/**
+ * A goal, as a task the machines understand.
+ *
+ * It queues a `plan`, not a `coder`: the first thing that happens to a goal is
+ * that a model works out what it actually needs — database, backend, frontend,
+ * design, motion, security — and only then are Claude Code, Codex and OpenCode
+ * given briefs. Nothing on this website writes code, and neither does the
+ * planner; it decides what the coding agents are asked to do.
+ */
+export function buildGoalTask(input: NewGoalRequest, goalId: string): BuiltTask {
+  const goal = (input.goal ?? '').trim();
+  if (goal.length < 3 || goal.length > 2000) {
+    return { ok: false, error: 'a goal has to be between 3 and 2000 characters' };
+  }
+  const projectDir = (input.projectDir ?? '').trim();
+  if (projectDir && !/^([a-zA-Z]:[\\/]|\/)/.test(projectDir)) {
+    return {
+      ok: false,
+      error: `"${projectDir}" is not a full path. Use something like C:/projects/showroom, or leave it blank and the machine will choose.`,
+    };
+  }
+  const parallel = Number(input.parallel);
+
+  return {
+    ok: true,
+    task: {
+      title: `Plan and build: ${goal}`.slice(0, 300),
+      payload: {
+        kind: 'plan',
+        goal,
+        goalId,
+        ...(projectDir ? { projectDir } : {}),
+        ...(Number.isFinite(parallel) && parallel > 0 ? { maxParallel: Math.min(6, Math.trunc(parallel)) } : {}),
+        ...(input.verifyCommand?.trim() ? { verifyCommand: input.verifyCommand.trim() } : {}),
+      },
+      state: 'pending',
+      requires: ['shell'],
+      // Planning and handing out work is not screen work; it must keep running
+      // while you are at the machine.
+      interactive: false,
+      urgent: false,
+      priority: 0,
+      attempts: 0,
+      // It parks between rounds rather than looping, and parking hands the
+      // attempt back — but a plan that genuinely cannot start should not retry
+      // for ever either.
+      maxAttempts: 5,
     },
   };
 }

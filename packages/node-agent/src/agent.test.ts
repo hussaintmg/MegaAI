@@ -6,6 +6,7 @@ import { NodeAgent, type NodeAgentOptions, type TaskHandler } from './agent.js';
 import { ResourceGuard } from './guard.js';
 import type { MachineSample } from './machine.js';
 import { StateFile } from './state.js';
+import { coderLockKey, lockKeysCollide } from './coder-task.js';
 
 const AWAY: MachineSample = { at: 0, cpuLoad: 0.1, memUsedPct: 0.4, idleSeconds: 900 };
 
@@ -262,4 +263,120 @@ test('a handler that finishes after being interrupted is not recorded as success
   const after = await h.mesh.store.getTask(task.id);
   assert.equal(after?.state, 'pending');
   assert.equal(after?.result, undefined);
+});
+
+/* ---------------- working in one project at the same time ---------------- */
+
+test('two agents work in one project at once, as long as their files do not meet', async () => {
+  const suspended = suspendable();
+  const h = harness(
+    { coder: suspended.handler },
+    {
+      lockKeyFor: (task) => coderLockKey(task.payload),
+      lockConflict: lockKeysCollide,
+    },
+  );
+
+  const api = await h.mesh.enqueue({
+    title: 'the API',
+    requires: ['shell'],
+    payload: { kind: 'coder', goal: 'g', task: 't', projectDir: 'C:/site', scope: ['app/api'] },
+  });
+  const page = await h.mesh.enqueue({
+    title: 'the page',
+    requires: ['shell'],
+    payload: { kind: 'coder', goal: 'g', task: 't', projectDir: 'C:/site', scope: ['app/page.tsx'] },
+  });
+  // Inside the API folder — the same place by any honest reading.
+  const inside = await h.mesh.enqueue({
+    title: 'the cars route',
+    requires: ['shell'],
+    payload: { kind: 'coder', goal: 'g', task: 't', projectDir: 'C:/site', scope: ['app/api/cars/route.ts'] },
+  });
+
+  await h.agent.start();
+
+  assert.ok(h.agent.runningIds.includes(api.id));
+  assert.ok(h.agent.runningIds.includes(page.id), 'this is the parallel work the whole plan is built around');
+  const held = await h.mesh.store.getTask(inside.id);
+  assert.equal(held?.state, 'pending', 'and this one is inside a folder someone is already in');
+  assert.equal(held?.attempts, 0, 'waiting never costs a retry');
+
+  suspended.release();
+  await h.agent.drain();
+});
+
+test('a task that declares no files still owns the whole folder', async () => {
+  const suspended = suspendable();
+  const h = harness(
+    { coder: suspended.handler },
+    { lockKeyFor: (task) => coderLockKey(task.payload), lockConflict: lockKeysCollide },
+  );
+
+  await h.mesh.enqueue({
+    title: 'do something to the site',
+    requires: ['shell'],
+    payload: { kind: 'coder', goal: 'g', task: 't', projectDir: 'C:/site' },
+  });
+  const scoped = await h.mesh.enqueue({
+    title: 'the page',
+    requires: ['shell'],
+    payload: { kind: 'coder', goal: 'g', task: 't', projectDir: 'C:/site', scope: ['app/page.tsx'] },
+  });
+
+  await h.agent.start();
+  assert.equal((await h.mesh.store.getTask(scoped.id))?.state, 'pending', 'guessing "probably not that file" is how work is lost');
+
+  suspended.release();
+  await h.agent.drain();
+});
+
+/* ---------------- how much this machine can really take ---------------- */
+
+test('the coding agents cap the machine, not just its temperature', async () => {
+  let free = 1;
+  const suspended = suspendable();
+  const h = harness({ coder: suspended.handler }, { capacity: () => free });
+
+  await h.mesh.enqueue({ title: 'one', requires: ['shell'], payload: { kind: 'coder' } });
+  await h.mesh.enqueue({ title: 'two', requires: ['shell'], payload: { kind: 'coder' } });
+
+  await h.agent.start();
+  assert.equal(h.agent.runningIds.length, 1, 'one agent free means one task, whatever the CPU says');
+
+  const node = await h.mesh.store.getNode(h.agent.nodeId);
+  assert.equal(node?.concurrency, 1, 'and the queue is told the truth, so it stops offering more');
+
+  free = 2;
+  await h.agent.tick();
+  assert.equal(h.agent.runningIds.length, 2, 'and a limit resetting is picked up on the next round');
+
+  suspended.release();
+  await h.agent.drain();
+});
+
+test('the supervisor never queues behind the work it is supposed to hand out', async () => {
+  const suspended = suspendable();
+  let planned = 0;
+  const h = harness(
+    {
+      coder: suspended.handler,
+      plan: async () => {
+        planned += 1;
+        return { kind: 'done' };
+      },
+    },
+    { capacity: () => 1, lightweight: (task) => task.payload['kind'] === 'plan' },
+  );
+
+  await h.mesh.enqueue({ title: 'a six hour build', requires: ['shell'], payload: { kind: 'coder' } });
+  await h.mesh.enqueue({ title: 'work out what is next', requires: ['shell'], payload: { kind: 'plan' } });
+
+  await h.agent.start();
+  // Without this, nothing new is ever handed out while the machine is busy —
+  // which is exactly when handing work out matters.
+  assert.equal(planned, 1);
+
+  suspended.release();
+  await h.agent.drain();
 });

@@ -42,7 +42,95 @@ enabled so it survives logout.
 
 ---
 
-## Giving it work
+## Giving it a goal
+
+`add` gives one instruction to one coding agent. `plan` gives it a *sentence*,
+and something has to work out what that sentence actually needs before anyone
+starts typing.
+
+```powershell
+node apps\node\dist\index.js set GEMINI_API_KEY "…"      # once — for planning only
+
+node apps\node\dist\index.js plan "build a 3D car showroom with test-drive bookings" ^
+    --project C:\projects\showroom ^
+    --parallel 3 ^
+    --verify "npm run build"
+```
+
+What happens next:
+
+1. **A planner thinks about it.** Not "make a plan" — it is asked, by name, what
+   the thing needs from the database, the backend, the frontend, the design, the
+   animation, the security, the tests and the build; what it should add that you
+   did not ask for and would have wanted; and what is going to go wrong. It
+   answers with pieces, and **every piece names the files it owns**.
+2. **A brief is written for each piece.** Not a restatement of your sentence —
+   the project, the stack, the folder, what this piece is for, the files it owns,
+   the files another agent is *in right now* and must not touch, numbered
+   acceptance criteria, and the standard.
+3. **The pieces that can start, start.** Three at once by default, and only where
+   their files do not overlap. Codex on the API while Claude Code does the
+   showroom page is real parallel work; two agents in `app/page.tsx` is two
+   agents undoing each other, and never happens.
+4. **It keeps watching.** When one finishes, the next piece it unblocked is
+   handed out — and that brief now says what the finished piece actually turned
+   out to be, so nothing is built against a guess.
+5. It parks between rounds rather than looping, so a reboot in the middle costs
+   one round rather than the night.
+
+**MegaAI's own model never writes code.** It plans, it writes the briefs, it
+decides who goes next. Every line in the project comes from Claude Code, Codex
+or OpenCode. Planning is a handful of long calls a night, so any free tier does
+it — Gemini, OpenRouter and Groq are all tried in that order, and your Anthropic
+key is deliberately last, because Claude Code needs that quota to write with.
+
+| Flag | |
+| --- | --- |
+| `--project` | where it gets built |
+| `--parallel` | how many pieces may be in flight at once (default 3) |
+| `--verify` | the build/test command every brief is told to run before claiming it is done |
+
+The same thing from the website: type the goal on the dashboard and it lands in
+the same queue. The goal page then shows the plan — the summary, the stack, what
+it decided to add and why, what it thinks will go wrong — and every piece with
+its state, its files, and which coding agent wrote it.
+
+---
+
+## Work that has to happen on screen
+
+Most coding is better off headless: it runs while you use the laptop and it
+survives the lid closing. Some of it is not — opening the project in VS Code and
+running Codex as the full application inside it, with the brief actually
+delivered into it.
+
+```powershell
+node apps\node\dist\index.js gui --project C:\projects\showroom          # just open it
+node apps\node\dist\index.js gui --project C:\projects\showroom ^
+    --coder codex --prompt "Rework the booking form" --dry-run
+```
+
+`--dry-run` prints the steps and the PowerShell they render to without touching
+the mouse, which is the first thing anyone sensibly wants from a program that
+drives their keyboard.
+
+It starts VS Code, waits for the window to actually appear (and fails loudly if
+it never does, rather than typing into whatever is in front), opens the
+integrated terminal with Ctrl+`, starts the agent, and pastes the brief.
+
+Pastes, not types: `SendKeys` treats `+ ^ % ~ ( ) { } [ ]` as control
+characters, a newline submits the prompt halfway through, and a 4 KB brief takes
+half a minute of visible typing that any stray keystroke corrupts. The brief is
+written to a file, the file goes to the clipboard, and one Ctrl+V puts it in
+exactly as written. The brief never appears inside the generated script either,
+so nothing in it can be read as code.
+
+These tasks take over the mouse and keyboard, so they are the ones that wait
+until you step away — `--urgent` if you want it now.
+
+---
+
+## Giving it one task
 
 ```powershell
 node apps\node\dist\index.js add "build the landing page" ^
@@ -53,11 +141,18 @@ node apps\node\dist\index.js add "build the landing page" ^
 
 | Flag | |
 | --- | --- |
-| `--project` | the folder to work in — required, and the folder two tasks never share |
+| `--project` | the folder to work in — required |
 | `--goal` | the bigger picture, carried into every handoff brief |
 | `--interactive` | it needs the mouse, keyboard or screen — so it waits until you step away |
 | `--urgent` | run it now even though it will interrupt you (only matters for `--interactive`) |
 | `--open` | open the folder in VS Code when it is done |
+
+A task added this way declares no files, so it owns the whole folder while it
+runs and nothing else in that project starts beside it. That is the safe
+reading: an instruction typed by hand says nothing about which files it will
+touch, and guessing "probably only those" is how two agents overwrite each
+other. Pieces that come from `plan` do declare their files, which is what lets
+them run together.
 
 Then leave `run` going — or let the Scheduled Task do it.
 
@@ -96,6 +191,15 @@ rather than assuming that reaching the end means it worked.
 | --- | --- | --- |
 | **full** | you have been away 3 minutes | everything, up to 3 at once — including work that takes over the screen |
 | **background** | you are at the keyboard | everything that stays out of your way, 2 at once. Only work needing the mouse/keyboard/screen waits |
+
+Those numbers are a ceiling, not a promise: the machine also never takes more
+coding work than it has free coding agents. Three installed with two out of
+quota and one that will not start means one, whatever the temperature says, and
+that is the number the queue is told — so tasks stop being claimed only to be
+parked again a second later. The planner is the exception; it uses a model in
+the cloud and a few kilobytes here, so it never waits for a slot. A busy machine
+that stopped handing work out would be stalling at exactly the moment there is
+most to hand out.
 | **stop** | over 82°C, under 20% battery unplugged, or memory over 94% | nothing |
 
 The line between the two top gears is **not** how urgent a task is — it is

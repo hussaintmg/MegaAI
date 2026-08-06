@@ -16,9 +16,11 @@
  *   - **The same node comes back.** Its id is on disk, so after a restart it
  *     re-registers as itself and releases the claims its dead process was
  *     holding, instead of leaving them stranded until the lease lapses.
- *   - **One project, one agent.** Several projects run at once, but two tasks
- *     in the same folder never do — two coding agents editing the same files
- *     is worse than doing nothing.
+ *   - **Two agents never share a file.** Several pieces of one project run at
+ *     the same time — that is the point — but each declares the files it owns,
+ *     and a task whose files are already held waits. A task that declares
+ *     nothing owns the whole folder, because guessing is how two coding agents
+ *     silently undo each other.
  */
 
 import type { JsonObject, Timestamp } from '@megaai/types';
@@ -58,8 +60,35 @@ export interface NodeAgentOptions {
   nodeId?: string;
   clock?: Clock;
   log?: (line: string) => void;
-  /** Tasks sharing a key never run at the same time — usually the project folder. */
-  lockKeyFor?: (task: MeshTask) => string | undefined;
+  /**
+   * What a task must hold exclusively while it runs — the project folder, or
+   * the individual files it owns. Tasks whose keys collide never overlap.
+   */
+  lockKeyFor?: (task: MeshTask) => string | string[] | undefined;
+  /**
+   * Whether a held key and a wanted key mean the same place.
+   *
+   * Exact equality by default. Path-shaped keys need more than that: a task
+   * holding `app/api` and one wanting `app/api/cars/route.ts` are in the same
+   * file, and only the caller knows its keys are paths.
+   */
+  lockConflict?: (held: string, wanted: string) => boolean;
+  /**
+   * A task that does not use the machine, so it never waits for a slot.
+   *
+   * The supervisor is the case this exists for: it reads the queue, writes
+   * some tasks and parks, in well under a second. Making it queue behind two
+   * six-hour builds means nothing new is ever handed out while the machine is
+   * busy — which is exactly when handing work out matters.
+   */
+  lightweight?: (task: MeshTask) => boolean;
+  /**
+   * How many tasks this machine can really run, beyond what heat and CPU say.
+   *
+   * The coding agents are the real limit: three installed, two out of quota
+   * and one broken means one, whatever the guard thinks of the temperature.
+   */
+  capacity?: () => number | undefined;
   /** Gap between rounds when `start()` is driving. */
   tickMs?: number;
   /** Lease renewal interval while a task runs. 0 disables it (tests). */
@@ -72,7 +101,9 @@ export interface NodeAgentOptions {
 interface RunningTask {
   task: MeshTask;
   controller: AbortController;
-  lockKey: string | undefined;
+  lockKeys: string[];
+  /** Does not count against the machine's concurrency. */
+  light: boolean;
   renew: NodeJS.Timeout | undefined;
   finished: Promise<void>;
 }
@@ -82,7 +113,7 @@ export class NodeAgent {
   private readonly clock: Clock;
   private readonly log: (line: string) => void;
   private readonly running = new Map<string, RunningTask>();
-  private readonly locks = new Set<string>();
+  private readonly locks: string[] = [];
   private readonly tickMs: number;
   private readonly renewMs: number;
   private readonly retryLaterMs: number;
@@ -106,6 +137,18 @@ export class NodeAgent {
 
   get runningIds(): string[] {
     return [...this.running.keys()];
+  }
+
+  /** Tasks currently using the machine — the supervisor is not one of them. */
+  private get heavyCount(): number {
+    let count = 0;
+    for (const running of this.running.values()) if (!running.light) count += 1;
+    return count;
+  }
+
+  private conflicts(wanted: string): string | undefined {
+    const collide = this.options.lockConflict ?? ((held: string, want: string) => held === want);
+    return this.locks.find((held) => collide(held, wanted));
   }
 
   /** Join the mesh, clean up after the previous run, and start working. */
@@ -162,10 +205,15 @@ export class NodeAgent {
   async tick(): Promise<GuardDecision> {
     const sample = await this.options.sample();
     const decision = this.options.guard.decide(sample);
+    // Heat and CPU say how much this machine *could* take; the coding agents
+    // say how much it can actually do. Whichever is smaller is the truth, and
+    // reporting the larger one gets tasks claimed only to be parked again.
+    const capacity = this.options.capacity?.();
+    const limit = Math.max(1, Math.min(decision.concurrency, capacity ?? Number.POSITIVE_INFINITY));
 
     await this.mesh.heartbeat(this.id, {
       gear: decision.gear,
-      concurrency: Math.max(1, decision.concurrency),
+      concurrency: limit,
       health: healthOf(sample),
     });
     if (decision.gear !== this.lastGear) {
@@ -184,11 +232,24 @@ export class NodeAgent {
     // one after another every single tick — a lot of noise and churn to
     // rediscover that the folder is busy.
     let claims = 0;
-    while (this.running.size < decision.concurrency && claims < decision.concurrency * 2) {
+    while (this.heavyCount < limit && claims < limit * 2) {
       const task = await this.mesh.claimNext(this.id);
       if (!task) break;
       claims += 1;
       await this.begin(task);
+    }
+
+    // Full up, but the work that decides what happens next costs this machine
+    // nothing to run. Left behind the queue it would only be picked up when
+    // something finished — so a busy machine would stop handing out work at
+    // exactly the moment there is most of it to hand out.
+    const light = this.options.lightweight;
+    if (light && this.heavyCount >= limit) {
+      for (let taken = 0; taken < 2; taken += 1) {
+        const task = await this.mesh.claimNext(this.id, light);
+        if (!task) break;
+        await this.begin(task);
+      }
     }
     return decision;
   }
@@ -215,23 +276,26 @@ export class NodeAgent {
       return;
     }
 
-    const lockKey = this.options.lockKeyFor?.(task);
-    if (lockKey && this.locks.has(lockKey)) {
+    const wanted = this.options.lockKeyFor?.(task);
+    const lockKeys = wanted === undefined ? [] : Array.isArray(wanted) ? wanted : [wanted];
+    const taken = lockKeys.map((key) => this.conflicts(key)).find((held): held is string => held !== undefined);
+    if (taken !== undefined) {
       await this.mesh.park(
         task.id,
         this.id,
         this.clock.now() + Math.min(this.retryLaterMs, 60_000),
-        `another task is already working in ${lockKey} — two agents in one folder undo each other`,
+        `another task is already working in ${taken} — two agents in one file undo each other`,
       );
       return;
     }
-    if (lockKey) this.locks.add(lockKey);
+    this.locks.push(...lockKeys);
 
     const controller = new AbortController();
     const running: RunningTask = {
       task,
       controller,
-      lockKey,
+      lockKeys,
+      light: this.options.lightweight?.(task) === true,
       renew: undefined,
       finished: Promise.resolve(),
     };
@@ -289,7 +353,12 @@ export class NodeAgent {
       this.log(`could not report on "${task.title}": ${(error as Error).message}`);
     } finally {
       if (running.renew) clearInterval(running.renew);
-      if (running.lockKey) this.locks.delete(running.lockKey);
+      for (const key of running.lockKeys) {
+        // Only one occurrence: two tasks may legitimately hold the same key
+        // when the conflict rule is looser than equality.
+        const at = this.locks.indexOf(key);
+        if (at >= 0) this.locks.splice(at, 1);
+      }
       this.running.delete(task.id);
     }
   }

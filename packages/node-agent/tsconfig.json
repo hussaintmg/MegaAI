@@ -1,11 +1,28 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "tsBuildInfoFile": "dist/.tsbuildinfo" },
-  "include": ["src"],
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../types" },
-    { "path": "../utils" },
-    { "path": "../mesh" },
-    { "path": "../coders" }
+    {
+      "path": "../types"
+    },
+    {
+      "path": "../utils"
+    },
+    {
+      "path": "../mesh"
+    },
+    {
+      "path": "../coders"
+    },
+    {
+      "path": "../blueprint"
+    }
   ]
 }

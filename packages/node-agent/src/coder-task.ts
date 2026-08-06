@@ -43,6 +43,15 @@ export interface CoderTaskPayload {
   model?: string;
   /** Open the folder in VS Code when the work is done. */
   openEditor?: boolean;
+  /**
+   * The files this task is allowed to work in.
+   *
+   * Set by the planner. Two tasks whose scopes do not overlap run at the same
+   * time in the same repository; without it a task owns the whole folder and
+   * everything else waits for it. That is the safe reading, and it is what a
+   * task typed in by hand gets.
+   */
+  scope?: string[];
 }
 
 export function isCoderPayload(payload: JsonObject): payload is JsonObject & CoderTaskPayload {
@@ -55,9 +64,56 @@ export function isCoderPayload(payload: JsonObject): payload is JsonObject & Cod
   );
 }
 
-/** The project folder of a coder task — what two tasks must not share. */
-export function coderLockKey(payload: JsonObject): string | undefined {
-  return isCoderPayload(payload) ? payload.projectDir : undefined;
+/**
+ * What two coder tasks must not hold at the same time.
+ *
+ * With a scope, that is one key per file it owns, so four agents work in four
+ * corners of one repository at once. Without a scope it is the folder itself,
+ * which is the old behaviour and the right default: an instruction typed by
+ * hand says nothing about which files it will touch, and guessing "probably
+ * only these" is how two agents overwrite each other.
+ */
+export function coderLockKey(payload: JsonObject): string[] {
+  if (!isCoderPayload(payload)) return [];
+  const scope = Array.isArray(payload['scope'])
+    ? (payload['scope'] as unknown[]).filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    : [];
+  if (scope.length === 0) return [payload.projectDir];
+  return scope.map((file) => `${payload.projectDir}::${file.replace(/\\/g, '/').replace(/^\.?\/+/, '')}`);
+}
+
+/**
+ * Do two lock keys mean the same place?
+ *
+ * `C:/site::app/api` and `C:/site::app/api/cars/route.ts` are one file inside
+ * the other, so they collide; `app/api/cars/route.ts` and
+ * `app/api/orders/route.ts` do not. Exact string equality would let the first
+ * pair run together, which is two agents editing one file — the failure this
+ * whole mechanism exists to prevent.
+ */
+export function lockKeysCollide(held: string, wanted: string): boolean {
+  if (held === wanted) return true;
+  const [heldDir = '', heldPath] = splitLockKey(held);
+  const [wantedDir = '', wantedPath] = splitLockKey(wanted);
+  if (heldDir !== wantedDir) return false;
+  // One of them is the whole folder.
+  if (heldPath === undefined || wantedPath === undefined) return true;
+  const a = trimScope(heldPath);
+  const b = trimScope(wantedPath);
+  if (a === '' || b === '') return true;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+function splitLockKey(key: string): [string, string | undefined] {
+  const at = key.indexOf('::');
+  return at < 0 ? [key, undefined] : [key.slice(0, at), key.slice(at + 2)];
+}
+
+function trimScope(file: string): string {
+  return file
+    .replace(/\/?\*+(?:\.[a-z0-9]+)?$/i, '')
+    .replace(/\/+$/, '')
+    .trim();
 }
 
 export interface CoderHandlerOptions {

@@ -1,12 +1,37 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "tsBuildInfoFile": "dist/.tsbuildinfo" },
-  "include": ["src"],
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../../packages/types" },
-    { "path": "../../packages/utils" },
-    { "path": "../../packages/mesh" },
-    { "path": "../../packages/coders" },
-    { "path": "../../packages/node-agent" }
+    {
+      "path": "../../packages/types"
+    },
+    {
+      "path": "../../packages/utils"
+    },
+    {
+      "path": "../../packages/mesh"
+    },
+    {
+      "path": "../../packages/coders"
+    },
+    {
+      "path": "../../packages/node-agent"
+    },
+    {
+      "path": "../../packages/ai"
+    },
+    {
+      "path": "../../packages/blueprint"
+    },
+    {
+      "path": "../../packages/contracts"
+    }
   ]
 }

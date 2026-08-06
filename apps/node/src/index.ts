@@ -5,7 +5,9 @@
  *   megaai-node run                    join the mesh and work
  *   megaai-node status                 what it can see right now
  *   megaai-node tasks                  everything in the queue, with ids
+ *   megaai-node plan "<goal>" --project <dir>   plan it properly, then build it in parallel
  *   megaai-node add "<task>" --project <dir> [--goal "<goal>"] [--interactive] [--urgent]
+ *   megaai-node gui --project <dir> [--coder codex --prompt "…"] [--dry-run]
  *   megaai-node retry <id|title>|--all queue a failed task again, as it was
  *   megaai-node cancel <id|title>      take one off the queue
  *   megaai-node set KEY VALUE          remember a setting across restarts
@@ -33,6 +35,9 @@ import {
   autostartPlan,
   coderLockKey,
   createCoderHandler,
+  createGuiHandler,
+  createPlanHandler,
+  lockKeysCollide,
   createProbe,
   createProcessLauncher,
   createSampler,
@@ -41,9 +46,14 @@ import {
   listProjectFiles,
   openInEditor,
   parseGitStatus,
+  planGuiSteps,
+  renderGuiScript,
   type CoderTaskPayload,
+  type GuiStep,
+  type GuiTaskPayload,
 } from '@megaai/node-agent';
 import { checkProjectDir, loadNodeConfig, type NodeConfig } from './config.js';
+import { createThinker } from './thinker.js';
 import { envFilePath, loadEnvFile, maskValue, parseEnv, writeEnvFile } from './env.js';
 import { explainMongoFailure, type MongoTrouble } from './mongo-trouble.js';
 
@@ -140,6 +150,8 @@ function buildAgent(config: NodeConfig, mesh: Mesh, log: (line: string) => void)
   });
   const state = new StateFile(config.stateFile);
 
+  const thinker = createThinker();
+
   const agent = new NodeAgent({
     mesh,
     name: config.name,
@@ -151,6 +163,16 @@ function buildAgent(config: NodeConfig, mesh: Mesh, log: (line: string) => void)
     tickMs: config.tickMs,
     log,
     lockKeyFor: (task: MeshTask) => coderLockKey(task.payload),
+    // The keys are paths, so `app/api` and `app/api/cars/route.ts` have to be
+    // recognised as the same place. String equality would let both run.
+    lockConflict: lockKeysCollide,
+    // Planning uses a model in the cloud and a few kilobytes here. Making it
+    // queue behind two builds would mean a busy machine stops handing out work
+    // at exactly the moment there is most of it to hand out.
+    lightweight: (task: MeshTask) => task.payload['kind'] === 'plan',
+    // Heat and CPU say what the machine could take; the coding agents say what
+    // it can actually do. Two out of quota and one broken means one.
+    capacity: () => Math.max(1, pool.available().length),
     handlers: {
       coder: createCoderHandler({
         pool,
@@ -163,10 +185,27 @@ function buildAgent(config: NodeConfig, mesh: Mesh, log: (line: string) => void)
           }
         },
       }),
+      plan: createPlanHandler({
+        mesh,
+        think: (prompt) => thinker.think(prompt),
+        listFiles: (projectDir) => listProjectFiles(projectDir, { limit: 150 }),
+        coders: () => pool.available().map((spec) => spec.name),
+        // A goal typed on a phone cannot name a folder on a laptop it has
+        // never seen, so the machine that picks it up decides — named after
+        // the goal, because a workspace of `project-1`, `project-2` is
+        // unreadable a week later.
+        resolveProjectDir: (goal) => path.join(config.workspaceDir, folderNameFor(goal)),
+        ensureDir: (dir) => mkdirSync(dir, { recursive: true }),
+      }),
+      gui: createGuiHandler({
+        scratchDir: config.stateDir,
+        writeFile: (file, contents) => writeFileSync(file, contents, { encoding: 'utf8' }),
+        run: async (file, args) => launcher(file, args, config.workspaceDir),
+      }),
     },
   });
 
-  return { agent, pool, guard, sample, found, probe };
+  return { agent, pool, guard, sample, found, probe, thinker };
 }
 
 /** Give the machine probe a chance to say something before judging it silent. */
@@ -200,6 +239,19 @@ function wrap(text: string, width: number): string[] {
 /** Where MegaAI itself lives — `apps/node/dist/index.js` is three deep. */
 function megaaiRoot(): string {
   return path.resolve(path.dirname(path.resolve(process.argv[1] ?? '.')), '..', '..', '..');
+}
+
+/** A folder name from a sentence: short, lowercase, and safe on Windows. */
+export function folderNameFor(goal: string): string {
+  const words = goal
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    // "build me a website that…" — the first few words are never the subject.
+    .filter((word) => !['build', 'make', 'create', 'me', 'a', 'an', 'the', 'my', 'please'].includes(word))
+    .slice(0, 4);
+  return words.join('-') || 'project';
 }
 
 function gitStatus(projectDir: string): string {
@@ -384,6 +436,145 @@ async function add(config: NodeConfig, args: string[]): Promise<void> {
     say(dim('It needs the screen, so it waits until you step away from the machine (--urgent overrides that).'));
   }
   say(dim(`It is in ${where}. Run "megaai-node run" (or leave it running) and it will be picked up.`));
+}
+
+/**
+ * Hand over a goal rather than a task.
+ *
+ * The difference is the whole point: `add` gives one instruction to one coding
+ * agent, `plan` gives a sentence to a planner that works out what the thing
+ * actually needs — backend, frontend, database, security, look, motion — and
+ * then keeps Claude Code, Codex and OpenCode busy on it in parallel until it
+ * is finished.
+ */
+async function plan(config: NodeConfig, args: string[]): Promise<void> {
+  const goal = args.find((entry) => !entry.startsWith('--'));
+  const projectDir = valueOf(args, '--project');
+  if (!goal || !projectDir) {
+    say(red('Usage: megaai-node plan "<what to build>" --project <folder> [--parallel 3] [--verify "npm run build"]'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const check = checkProjectDir(projectDir, megaaiRoot());
+  if (!check.ok) {
+    say(red(check.error ?? 'that project folder cannot be used'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const thinker = createThinker();
+  const parallel = Number(valueOf(args, '--parallel') ?? '3');
+  mkdirSync(check.resolved, { recursive: true });
+  const { store, close, where } = await openStore(config);
+  const mesh = new Mesh({ store });
+  const task = await mesh.enqueue({
+    title: `Plan and build: ${goal}`.slice(0, 300),
+    requires: ['shell'],
+    payload: {
+      kind: 'plan',
+      goal,
+      projectDir: check.resolved,
+      maxParallel: Number.isFinite(parallel) ? Math.max(1, Math.trunc(parallel)) : 3,
+      ...(valueOf(args, '--verify') ? { verifyCommand: valueOf(args, '--verify') } : {}),
+    } as JsonObject,
+  });
+  await close();
+
+  say(`${green('Queued')} "${task.title}"`);
+  say(dim(`Planning with: ${thinker.describe()}`));
+  say(dim('The plan decides the work; Claude Code, Codex and OpenCode write every line of it.'));
+  say(dim(`It is in ${where}. Run "megaai-node run" (or leave it running) and it will start.`));
+}
+
+/**
+ * Work that has to happen on screen.
+ *
+ * `--dry-run` prints the steps and the script without touching the mouse,
+ * because the first thing anyone sensibly wants to know about a program that
+ * drives their keyboard is exactly what it is going to press.
+ */
+async function gui(config: NodeConfig, args: string[]): Promise<void> {
+  const projectDir = valueOf(args, '--project');
+  const command = valueOf(args, '--coder');
+  const prompt = valueOf(args, '--prompt');
+  if (!projectDir) {
+    say(red('Usage: megaai-node gui --project <folder> [--coder codex --prompt "<brief>"] [--urgent] [--dry-run]'));
+    say(dim('With no --coder it opens the folder in VS Code; with one it opens that agent inside the editor.'));
+    process.exitCode = 1;
+    return;
+  }
+  const check = checkProjectDir(projectDir, megaaiRoot());
+  if (!check.ok) {
+    say(red(check.error ?? 'that project folder cannot be used'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const payload: GuiTaskPayload = {
+    kind: 'gui',
+    action: command ? 'coder' : 'editor',
+    projectDir: check.resolved,
+    ...(command ? { command } : {}),
+    ...(prompt ? { prompt } : {}),
+  };
+
+  if (args.includes('--dry-run')) {
+    const planned = planGuiSteps(payload, path.join(config.stateDir, 'gui-preview.prompt.txt'));
+    if (planned.error) {
+      say(red(planned.error));
+      process.exitCode = 1;
+      return;
+    }
+    say(bold('It would do this, in order:'));
+    for (const [index, step] of planned.steps.entries()) {
+      say(`  ${String(index + 1).padStart(2)}. ${describeStep(step)}`);
+    }
+    say();
+    say(dim('The PowerShell it renders to:'));
+    say(dim(renderGuiScript(planned.steps)));
+    return;
+  }
+
+  const { store, close, where } = await openStore(config);
+  const mesh = new Mesh({ store });
+  const task = await mesh.enqueue({
+    title: command ? `Open ${command} in VS Code on ${check.resolved}` : `Open ${check.resolved} in VS Code`,
+    requires: ['shell', 'browser'],
+    // It takes over the mouse and the keyboard, so it waits until you are not
+    // using the machine — unless you say you want it now.
+    interactive: true,
+    urgent: args.includes('--urgent'),
+    payload: payload as unknown as JsonObject,
+  });
+  await close();
+
+  say(`${green('Queued')} "${task.title}"`);
+  say(dim('It drives the real mouse and keyboard, so it waits until you step away (--urgent overrides that).'));
+  say(dim(`It is in ${where}.`));
+}
+
+function describeStep(step: GuiStep): string {
+  switch (step.do) {
+    case 'launch':
+      return `start ${step.file}${step.args?.length ? ` ${step.args.join(' ')}` : ''}`;
+    case 'focus':
+      return `wait for the window called "…${step.titleContains}…" and bring it to the front`;
+    case 'move':
+      return `move the pointer to ${step.x},${step.y}`;
+    case 'click':
+      return `${step.double ? 'double-' : ''}${step.button ?? 'left'} click${
+        step.x !== undefined ? ` at ${step.x},${step.y}` : ' where the pointer is'
+      }`;
+    case 'keys':
+      return `press ${step.keys}`;
+    case 'type':
+      return `type ${JSON.stringify(step.text)}`;
+    case 'paste':
+      return `paste the brief from ${step.path}`;
+    case 'wait':
+      return `wait ${step.ms}ms`;
+  }
 }
 
 async function tasks(config: NodeConfig): Promise<void> {
@@ -685,6 +876,12 @@ async function main(): Promise<void> {
     case 'add':
       await add(config, args);
       break;
+    case 'plan':
+      await plan(config, args);
+      break;
+    case 'gui':
+      await gui(config, args);
+      break;
     case 'tasks':
       await tasks(config);
       break;
@@ -705,7 +902,7 @@ async function main(): Promise<void> {
       break;
     default:
       say(`Unknown command "${command}".`);
-      say('Try: run · status · tasks · add · retry · cancel · set · install · uninstall');
+      say('Try: run · status · tasks · plan · add · gui · retry · cancel · set · install · uninstall');
       process.exitCode = 1;
   }
 }

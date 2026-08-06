@@ -396,7 +396,7 @@ export class Mesh {
    * being online means this one waits, which is what makes "laptop first" real
    * rather than a preference the cloud ignores because it asked first.
    */
-  async claimNext(nodeId: string): Promise<MeshTask | undefined> {
+  async claimNext(nodeId: string, accept?: (task: MeshTask) => boolean): Promise<MeshTask | undefined> {
     await this.reclaimExpired();
     const node = await this.store.getNode(nodeId);
     if (!node) throw new MegaError('NOT_FOUND', `Unknown node "${nodeId}"`);
@@ -406,11 +406,21 @@ export class Mesh {
     const others = (await this.onlineNodes()).filter((other) => other.id !== nodeId);
     const tasks = await this.store.listTasks({ states: LIVE_STATES });
 
-    const running = tasks.filter((task) => task.claimedBy === nodeId && (task.state === 'claimed' || task.state === 'running'));
-    if (running.length >= node.concurrency) return undefined;
+    // `accept` means the caller is asking for one particular class of work and
+    // is counting slots itself — a node at its limit still wanting the task
+    // that decides what the *next* work is. Applying the node's concurrency on
+    // top of that would deadlock precisely the case it exists to serve, so the
+    // caller owns the accounting whenever it narrows the ask.
+    if (!accept) {
+      const held = tasks.filter(
+        (task) => task.claimedBy === nodeId && (task.state === 'claimed' || task.state === 'running'),
+      );
+      if (held.length >= node.concurrency) return undefined;
+    }
 
     const eligible = tasks
       .filter((task) => task.state === 'pending')
+      .filter((task) => !accept || accept(task))
       .filter((task) => (task.notBefore ?? 0) <= now)
       .filter((task) => this.capable(node, task))
       // A node in background gear leaves the *screen* alone; everything else

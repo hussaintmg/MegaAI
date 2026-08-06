@@ -27,6 +27,8 @@ export interface GoalDoc {
   _id?: ObjectId;
   goal: string;
   status: GoalStatus;
+  /** The `plan` task in the queue that is actually doing it. */
+  planTaskId?: string;
   source: 'dashboard' | 'schedule';
   createdBy?: string;
   createdAt: Date;
