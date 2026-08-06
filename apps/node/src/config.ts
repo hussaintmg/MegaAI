@@ -69,6 +69,57 @@ function readNumber(
   return value;
 }
 
+export interface ProjectDirCheck {
+  ok: boolean;
+  resolved: string;
+  error?: string;
+}
+
+/**
+ * Decide whether a `--project` is somewhere work may actually happen.
+ *
+ * Two refusals, both from watching this go wrong:
+ *
+ * A shell ate the backslashes in `C:\Automation\projects\velocity` and the CLI
+ * received `Automationprojectsvelocity`. `path.resolve` turned that into a
+ * folder inside whatever directory the command ran from, `mkdir -p` created
+ * it, and the task was queued against a path nobody meant — silently, because
+ * every step individually succeeded. A relative path is nearly always damage
+ * rather than intent, so it is refused with the mangling named.
+ *
+ * And pointing a coding agent at MegaAI's own checkout means MegaAI rewrites
+ * itself while it is running. That one is easy to do by accident when the
+ * checkout is the folder you happen to be standing in.
+ */
+export function checkProjectDir(input: string, megaaiRoot: string, cwd = process.cwd()): ProjectDirCheck {
+  const resolved = path.resolve(cwd, input);
+  if (!path.isAbsolute(input)) {
+    return {
+      ok: false,
+      resolved,
+      error:
+        `--project must be a full path, and "${input}" is not one. It would land in ${resolved}.\n` +
+        'If you meant an absolute Windows path, the backslashes were probably eaten by the shell — ' +
+        'use forward slashes (C:/Automation/projects/velocity), which Node understands on Windows too.',
+    };
+  }
+
+  const root = path.resolve(megaaiRoot);
+  const relative = path.relative(root, resolved);
+  const insideMegaai = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  if (insideMegaai) {
+    return {
+      ok: false,
+      resolved,
+      error:
+        `${resolved} is inside MegaAI's own source (${root}).\n` +
+        'A coding agent pointed there would start rewriting MegaAI while it is running. Pick a folder outside it.',
+    };
+  }
+
+  return { ok: true, resolved };
+}
+
 export function loadNodeConfig(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,

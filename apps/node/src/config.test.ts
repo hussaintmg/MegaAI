@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadNodeConfig } from './config.js';
+import { checkProjectDir, loadNodeConfig } from './config.js';
 
 test('with nothing configured it still knows what to do', () => {
   const config = loadNodeConfig({ HOME: '/home/me' }, 'linux', 'workstation');
@@ -54,4 +54,37 @@ test('a capability nothing understands is called out rather than accepted', () =
   const config = loadNodeConfig({ HOME: '/h', MEGAAI_CAPABILITIES: 'shell, printer' }, 'linux', 'x');
   assert.deepEqual(config.capabilities, ['shell', 'printer']);
   assert.match(config.notices.join(' '), /printer, which nothing asks for/);
+});
+
+/* ---------------- where work is allowed to happen ---------------- */
+
+test('a path the shell mangled is refused, not quietly created somewhere', () => {
+  // Seen for real: `--project C:\Automation\projects\velocity` arrived as
+  // `Automationprojectsvelocity` after a shell ate the backslashes. resolve()
+  // turned it into a folder under the current directory, mkdir made it, and
+  // the task was queued against a path nobody meant — every step succeeding.
+  const check = checkProjectDir('Automationprojectsvelocity', '/repo/megaai', '/repo/megaai');
+  assert.equal(check.ok, false);
+  assert.match(check.error ?? '', /must be a full path/);
+  assert.match(check.error ?? '', /backslashes were probably eaten/);
+  assert.match(check.error ?? '', /forward slashes/, 'and it says what to do instead');
+});
+
+test('MegaAI refuses to be pointed at itself', () => {
+  for (const inside of ['/repo/megaai', '/repo/megaai/apps/node', '/repo/megaai/workspace/site']) {
+    const check = checkProjectDir(inside, '/repo/megaai', '/tmp');
+    assert.equal(check.ok, false, `${inside} is inside the checkout`);
+    assert.match(check.error ?? '', /rewriting MegaAI while it is running/);
+  }
+});
+
+test('a folder next to the checkout is fine — only inside is the problem', () => {
+  const check = checkProjectDir('/repo/megaai-projects/velocity', '/repo/megaai', '/tmp');
+  assert.equal(check.ok, true);
+  assert.equal(check.resolved, '/repo/megaai-projects/velocity');
+});
+
+test('forward slashes are accepted, which is the way round Windows shells survive', () => {
+  const check = checkProjectDir('/c/Automation/projects/velocity', '/repo/megaai', '/tmp');
+  assert.equal(check.ok, true);
 });

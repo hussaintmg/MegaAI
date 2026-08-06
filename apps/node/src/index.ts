@@ -40,7 +40,7 @@ import {
   parseGitStatus,
   type CoderTaskPayload,
 } from '@megaai/node-agent';
-import { loadNodeConfig, type NodeConfig } from './config.js';
+import { checkProjectDir, loadNodeConfig, type NodeConfig } from './config.js';
 
 const useColor = process.stdout.isTTY && !process.env['NO_COLOR'];
 const paint = (code: string, text: string): string => (useColor ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -128,6 +128,11 @@ async function waitForProbe(probe: { latest: () => Record<string, unknown> }, ti
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return Object.keys(probe.latest()).length > 0;
+}
+
+/** Where MegaAI itself lives — `apps/node/dist/index.js` is three deep. */
+function megaaiRoot(): string {
+  return path.resolve(path.dirname(path.resolve(process.argv[1] ?? '.')), '..', '..', '..');
 }
 
 function gitStatus(projectDir: string): string {
@@ -241,7 +246,15 @@ async function add(config: NodeConfig, args: string[]): Promise<void> {
     return;
   }
 
-  const resolved = path.resolve(projectDir);
+  // Checked *before* mkdir: creating the folder first is what turned a mangled
+  // path into a real directory nobody asked for.
+  const check = checkProjectDir(projectDir, megaaiRoot());
+  if (!check.ok) {
+    say(red(check.error ?? 'that project folder cannot be used'));
+    process.exitCode = 1;
+    return;
+  }
+  const resolved = check.resolved;
   mkdirSync(resolved, { recursive: true });
   const { store, close, where } = await openStore(config);
   const mesh = new Mesh({ store });

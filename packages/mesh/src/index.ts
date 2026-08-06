@@ -567,9 +567,18 @@ export class Mesh {
         : `retrying in ${seconds}s after: ${task.error ?? 'a failure'}`;
     }
     const nodes = await this.store.listNodes();
+    // "No node has the capability" and "no node exists yet" are different
+    // problems with different answers, and reporting the first when it is
+    // really the second sends people hunting for configuration that is missing
+    // by definition: a machine joins the queue by *running the agent*, so a
+    // freshly-filled queue always looks unroutable until something starts.
+    if (nodes.length === 0) {
+      return 'no machine has joined the queue yet — start the agent (`megaai-node run`) on the machine that should do this work';
+    }
     const capable = nodes.filter((node) => this.capable(node, task));
     if (capable.length === 0) {
-      return `no node can run this — it needs ${task.requires.join(', ') || 'nothing in particular'}, and none is registered with that`;
+      const known = nodes.map((node) => `${node.name} (${node.capabilities.join(', ') || 'nothing'})`).join('; ');
+      return `no node can run this — it needs ${task.requires.join(', ') || 'nothing in particular'}, and the machines that have joined are: ${known}`;
     }
     const online = capable.filter((node) => this.isOnline(node));
     if (online.length === 0) {

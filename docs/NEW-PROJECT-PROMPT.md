@@ -39,9 +39,14 @@ Do this:
    builds and the home page renders", not "start the frontend". Order them so
    each one can be finished without the next existing yet. Queue them:
 
-   node C:\Automation\MegaAIByClaude\apps\node\dist\index.js add "<task>" ^
-        --project <<PROJECT FOLDER>> ^
+   node C:/Automation/MegaAIByClaude/apps/node/dist/index.js add "<task>" ^
+        --project <<PROJECT FOLDER, with forward slashes>> ^
         --goal "<one sentence: what the whole project is>"
+
+   Use forward slashes. Node understands them on Windows, and a backslash path
+   passed through a shell layer loses its backslashes — `C:\Automation\projects\x`
+   arrives as `Automationprojectsx`. The CLI now refuses that rather than
+   creating a folder nobody meant, but forward slashes avoid the argument.
 
    Use the same --goal on every task. Add --urgent only to something I am
    waiting on right now; everything else should wait until I am away from the
