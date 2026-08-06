@@ -9,11 +9,20 @@
  * you had not is exactly what makes a background agent something people
  * uninstall.
  *
- * Three gears, as promised in the plan:
+ * Three gears:
  *
- *   full   — you are away. Everything runs, several at a time.
- *   gentle — you are here. Urgent work only, one at a time.
- *   stop   — too hot, nearly out of battery, or nearly out of memory. Nothing.
+ *   full        you are away. Everything runs, several at a time, including
+ *               work that takes over the screen.
+ *   background  you are here. Everything that stays out of your way still
+ *               runs — a coding agent in a background process costs you
+ *               nothing while you type. Only work that needs the mouse, the
+ *               keyboard or the screen waits.
+ *   stop        too hot, nearly out of battery, or nearly out of memory.
+ *
+ * The first version of this stopped *all* non-urgent work while you were at
+ * the keyboard, which was the wrong axis entirely: it is not how urgent a task
+ * is that decides whether it disturbs you, it is whether it needs the human
+ * interface. That version left a laptop doing nothing all day for no reason.
  */
 
 import type { Gear } from '@megaai/mesh';
@@ -47,7 +56,14 @@ export interface GuardThresholds {
   quietCpu: number;
   /** How many tasks at once in each gear. */
   fullConcurrency: number;
-  gentleConcurrency: number;
+  /**
+   * How many while you are using the machine.
+   *
+   * Not zero, and not one for the sake of it: background work should carry on.
+   * It is lower than `fullConcurrency` only so three simultaneous builds do not
+   * make the machine feel slow under your hands.
+   */
+  backgroundConcurrency: number;
   /** Do not change gear more often than this, so it cannot flap. */
   minHoldMs: number;
 }
@@ -62,7 +78,7 @@ export const DEFAULT_THRESHOLDS: GuardThresholds = {
   busyCpu: 0.85,
   quietCpu: 0.12,
   fullConcurrency: 3,
-  gentleConcurrency: 1,
+  backgroundConcurrency: 2,
   minHoldMs: 20_000,
 };
 
@@ -122,9 +138,9 @@ export class ResourceGuard {
   private evaluate(sample: MachineSample): Omit<GuardDecision, 'at'> {
     const t = this.thresholds;
     const stop = (reason: string): Omit<GuardDecision, 'at'> => ({ gear: 'stop', concurrency: 0, reason });
-    const gentle = (reason: string): Omit<GuardDecision, 'at'> => ({
-      gear: 'gentle',
-      concurrency: t.gentleConcurrency,
+    const background = (reason: string): Omit<GuardDecision, 'at'> => ({
+      gear: 'background',
+      concurrency: t.backgroundConcurrency,
       reason,
     });
 
@@ -145,7 +161,7 @@ export class ResourceGuard {
         return stop('the temperature reading stopped coming while the machine was hot — waiting rather than assuming');
       }
       this.coolingDown = false;
-      return gentle('the temperature is no longer readable — working slowly, one thing at a time, to stay safe');
+      return background('the temperature is no longer readable — keeping to background work only, to stay safe');
     }
 
     if (sample.batteryPct !== undefined && sample.charging === false && sample.batteryPct <= t.lowBatteryPct) {
@@ -164,12 +180,14 @@ export class ResourceGuard {
     this.quietSince = undefined;
 
     if (sample.idleSeconds < t.idleAfterSeconds) {
-      return gentle(`you used the machine ${describeIdle(sample.idleSeconds)} ago — staying out of the way`);
+      return background(
+        `you used the machine ${describeIdle(sample.idleSeconds)} ago — background work continues, anything needing the screen waits`,
+      );
     }
 
     if (sample.cpuLoad >= t.busyCpu) {
-      return gentle(
-        `you are away, but the CPU is already ${Math.round(sample.cpuLoad * 100)}% busy — running one thing at a time`,
+      return background(
+        `you are away, but the CPU is already ${Math.round(sample.cpuLoad * 100)}% busy — holding back to background work`,
       );
     }
 
@@ -183,7 +201,7 @@ export class ResourceGuard {
   /**
    * What to do when the machine cannot say whether you are at the keyboard.
    *
-   * The first version of this simply stayed in `gentle` forever, which was
+   * The first version of this simply stayed in `background` forever, which was
    * safe and useless: on any machine without an idle-time reading — a Linux
    * box, a Windows install where the probe cannot start — the entire backlog
    * would be deferred until the end of time, quietly, which is the exact
@@ -198,24 +216,25 @@ export class ResourceGuard {
   private withoutIdleTime(sample: MachineSample): Omit<GuardDecision, 'at'> {
     const t = this.thresholds;
     const now = this.clock.now();
+    const background = (reason: string): Omit<GuardDecision, 'at'> => ({
+      gear: 'background',
+      concurrency: t.backgroundConcurrency,
+      reason,
+    });
 
     if (sample.cpuLoad > t.quietCpu) {
       this.quietSince = undefined;
-      return {
-        gear: 'gentle',
-        concurrency: t.gentleConcurrency,
-        reason: `this machine cannot report idle time, and it is ${Math.round(sample.cpuLoad * 100)}% busy — assuming you are using it`,
-      };
+      return background(
+        `this machine cannot report idle time, and it is ${Math.round(sample.cpuLoad * 100)}% busy — assuming you are using it`,
+      );
     }
 
     this.quietSince ??= now;
     const quietFor = (now - this.quietSince) / 1000;
     if (quietFor < t.idleAfterSeconds) {
-      return {
-        gear: 'gentle',
-        concurrency: t.gentleConcurrency,
-        reason: `this machine cannot report idle time; it has only been quiet ${describeIdle(quietFor)} — urgent work only for now`,
-      };
+      return background(
+        `this machine cannot report idle time; it has only been quiet ${describeIdle(quietFor)} — background work only for now`,
+      );
     }
 
     return {
@@ -227,7 +246,7 @@ export class ResourceGuard {
 }
 
 function rank(gear: Gear): number {
-  return gear === 'stop' ? 0 : gear === 'gentle' ? 1 : 2;
+  return gear === 'stop' ? 0 : gear === 'background' ? 1 : 2;
 }
 
 function round(value: number): number {

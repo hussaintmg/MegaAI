@@ -55,7 +55,7 @@ test('the node keeps its identity across restarts', async () => {
 test('the file is written to one side and renamed over — a power cut cannot half-write it', async () => {
   const d = disk();
   const state = new StateFile('/state/node.json', d.options);
-  await state.save({ gear: 'gentle' });
+  await state.save({ gear: 'background' });
   assert.deepEqual(d.order, ['write /state/node.json.tmp', 'rename /state/node.json.tmp -> /state/node.json']);
 });
 

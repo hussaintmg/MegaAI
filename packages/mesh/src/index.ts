@@ -43,8 +43,22 @@ export type Capability =
 
 export type NodeKind = 'laptop' | 'phone' | 'cloud';
 
-/** How busy a node is willing to be right now. */
-export type Gear = 'full' | 'gentle' | 'stop';
+/**
+ * How much of the machine a node is willing to give right now.
+ *
+ * The distinction that matters is *not* how urgent the work is — it is whether
+ * the work needs the human interface. A coding agent in a background process
+ * costs you nothing while you type; a task that grabs the mouse, focuses a
+ * window or photographs the screen makes the machine unusable for as long as
+ * it runs. So:
+ *
+ *   full        you are away — everything runs, including anything that takes
+ *               over the screen
+ *   background  you are here — everything that stays out of your way runs;
+ *               only work that needs the screen waits
+ *   stop        too hot, nearly flat, or nearly out of memory — nothing runs
+ */
+export type Gear = 'full' | 'background' | 'stop';
 
 export interface NodeRecord {
   id: string;
@@ -78,7 +92,16 @@ export interface MeshTask {
   state: MeshTaskState;
   /** Every one of these must be present on the node that runs it. */
   requires: Capability[];
-  /** Urgent work interrupts you; normal work waits until you are idle. */
+  /**
+   * Needs the mouse, the keyboard or the screen — opening an app and driving
+   * it, watching a window, a headful browser. These are the only tasks that
+   * have to wait while you are using the machine.
+   */
+  interactive: boolean;
+  /**
+   * Run it even though it would interrupt you, because you asked for it now.
+   * Only meaningful for interactive work; everything else already runs.
+   */
   urgent: boolean;
   priority: number;
   createdAt: Timestamp;
@@ -114,6 +137,7 @@ export interface EnqueueOptions {
   title: string;
   payload?: JsonObject;
   requires?: Capability[];
+  interactive?: boolean;
   urgent?: boolean;
   priority?: number;
   maxAttempts?: number;
@@ -313,6 +337,7 @@ export class Mesh {
       payload: options.payload ?? {},
       state: 'pending',
       requires: [...new Set(options.requires ?? [])],
+      interactive: options.interactive === true,
       urgent: options.urgent === true,
       priority: options.priority ?? 0,
       createdAt: now,
@@ -388,9 +413,11 @@ export class Mesh {
       .filter((task) => task.state === 'pending')
       .filter((task) => (task.notBefore ?? 0) <= now)
       .filter((task) => this.capable(node, task))
-      // In gentle gear the node takes urgent work only — that is how the
-      // laptop stops competing with you for its own CPU.
-      .filter((task) => node.gear === 'full' || task.urgent)
+      // A node in background gear leaves the *screen* alone; everything else
+      // it can still do, because a coding agent in a background process costs
+      // you nothing while you type. Urgent interactive work is the exception —
+      // you asked for it now, so being interrupted is the point.
+      .filter((task) => node.gear === 'full' || !task.interactive || task.urgent)
       // Someone better is awake and can take it; leave it for them.
       .filter((task) => !others.some((other) => other.priority > node.priority && other.gear !== 'stop' && this.capable(other, task)))
       .sort(
@@ -588,8 +615,8 @@ export class Mesh {
     if (online.every((node) => node.gear === 'stop')) {
       return `every capable node is paused (${online.map((n) => n.name).join(', ')})`;
     }
-    if (!task.urgent && online.every((node) => node.gear === 'gentle')) {
-      return 'deferred while you are using the machine — it will run when you are idle';
+    if (task.interactive && !task.urgent && online.every((node) => node.gear === 'background')) {
+      return 'this one needs the mouse and screen, so it waits until you step away from the machine';
     }
     return 'queued, waiting for a free slot';
   }

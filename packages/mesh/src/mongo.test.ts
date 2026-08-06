@@ -134,6 +134,7 @@ test('a released task really loses its holder — $set alone would not', async (
     payload: {},
     state: 'claimed',
     requires: ['shell'],
+    interactive: false,
     urgent: false,
     priority: 0,
     createdAt: 1,

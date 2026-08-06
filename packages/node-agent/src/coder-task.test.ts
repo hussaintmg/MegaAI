@@ -40,6 +40,7 @@ function contextFor(payload: JsonObject, checkpoint?: JsonObject) {
     payload,
     state: 'running',
     requires: [],
+    interactive: false,
     urgent: false,
     priority: 0,
     createdAt: 0,

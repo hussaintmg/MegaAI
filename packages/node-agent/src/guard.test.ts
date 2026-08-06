@@ -21,12 +21,14 @@ test('away and quiet means everything runs', () => {
   assert.match(decision.reason, /away 15m/);
 });
 
-test('while you are at the keyboard it takes urgent work only', () => {
+test('while you are at the keyboard, background work carries on', () => {
+  // The point of the correction: `claude -p` in a background process costs you
+  // nothing while you type. Only work that grabs the screen has to wait.
   const { g } = guard();
   const decision = g.decide(sample({ idleSeconds: 4 }));
-  assert.equal(decision.gear, 'gentle');
-  assert.equal(decision.concurrency, 1);
-  assert.match(decision.reason, /staying out of the way/);
+  assert.equal(decision.gear, 'background');
+  assert.equal(decision.concurrency, 2, 'not zero and not one for the sake of it');
+  assert.match(decision.reason, /background work continues, anything needing the screen waits/);
 });
 
 test('a machine that cannot report idle time is judged by its load instead', () => {
@@ -36,12 +38,12 @@ test('a machine that cannot report idle time is judged by its load instead', () 
   const { g, clock } = guard();
 
   const busy = g.decide(sample({ idleSeconds: undefined, cpuLoad: 0.4 }));
-  assert.equal(busy.gear, 'gentle');
+  assert.equal(busy.gear, 'background');
   assert.match(busy.reason, /cannot report idle time, and it is 40% busy/);
 
   // Quiet, but not for long enough yet to call it "away".
   const early = g.decide(sample({ idleSeconds: undefined, cpuLoad: 0.02 }));
-  assert.equal(early.gear, 'gentle');
+  assert.equal(early.gear, 'background');
   assert.match(early.reason, /only been quiet/);
 
   clock.advance(181_000);
@@ -56,7 +58,7 @@ test('a burst of activity restarts the count — the quiet has to be continuous'
   clock.advance(170_000);
   g.decide(sample({ idleSeconds: undefined, cpuLoad: 0.5 })); // you came back
   clock.advance(20_000);
-  assert.equal(g.decide(sample({ idleSeconds: undefined, cpuLoad: 0.02 })).gear, 'gentle');
+  assert.equal(g.decide(sample({ idleSeconds: undefined, cpuLoad: 0.02 })).gear, 'background');
 });
 
 test('a real idle-time reading always wins over the guess', () => {
@@ -67,14 +69,14 @@ test('a real idle-time reading always wins over the guess', () => {
   assert.equal(g.decide(sample({ idleSeconds: undefined, cpuLoad: 0.01 })).gear, 'full');
   // …then the probe starts working and says you are right here.
   const decision = g.decide(sample({ idleSeconds: 2, cpuLoad: 0.01 }));
-  assert.equal(decision.gear, 'gentle');
-  assert.match(decision.reason, /staying out of the way/);
+  assert.equal(decision.gear, 'background');
+  assert.match(decision.reason, /background work continues/);
 });
 
 test('away, but the machine is already working hard — one thing at a time', () => {
   const { g } = guard();
   const decision = g.decide(sample({ idleSeconds: 3_600, cpuLoad: 0.93 }));
-  assert.equal(decision.gear, 'gentle');
+  assert.equal(decision.gear, 'background');
   assert.match(decision.reason, /already 93% busy/);
 });
 
@@ -103,7 +105,7 @@ test('a temperature reading that vanishes while hot is not good news', () => {
   // …but a dead probe must not pause the machine forever either.
   clock.advance(5 * 60_000 + 1);
   const after = g.decide(sample({ idleSeconds: 900 }));
-  assert.equal(after.gear, 'gentle');
+  assert.equal(after.gear, 'background');
   assert.match(after.reason, /no longer readable/);
 });
 
@@ -128,10 +130,10 @@ test('gear does not flap: speeding up waits, stopping never does', () => {
   const clock = new ManualClock(0);
   const g = new ResourceGuard({ clock, thresholds: { minHoldMs: 20_000 } });
 
-  assert.equal(g.decide(sample({ idleSeconds: 5 })).gear, 'gentle');
+  assert.equal(g.decide(sample({ idleSeconds: 5 })).gear, 'background');
 
   clock.advance(3_000);
-  assert.equal(g.decide(sample({ idleSeconds: 900 })).gear, 'gentle', 'one quiet moment is not you leaving');
+  assert.equal(g.decide(sample({ idleSeconds: 900 })).gear, 'background', 'one quiet moment is not you leaving');
 
   clock.advance(20_000);
   assert.equal(g.decide(sample({ idleSeconds: 900 })).gear, 'full');

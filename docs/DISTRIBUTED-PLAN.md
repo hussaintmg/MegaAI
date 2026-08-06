@@ -96,12 +96,15 @@ node that has those capabilities.
 This is a hard requirement, not a nice-to-have. The laptop agent:
 
 - Samples CPU load, RAM, and package temperature every few seconds.
-- Has three gears: **full** (you are away / screen locked), **gentle** (you are
-  active — one task at a time, `nice`d, paused during your foreground work),
-  and **stop** (temperature over threshold, or battery below 20% unplugged).
-- Defers anything not marked urgent while you are working, and drains the
-  backlog when you go idle — which is the "raat ko sab pending kaam" you asked
-  for.
+- Has three gears: **full** (you are away — everything runs, including work
+  that takes over the screen), **background** (you are here — everything that
+  stays out of your way still runs; only work needing the mouse, keyboard or
+  screen waits), and **stop** (too hot, nearly flat, nearly out of memory).
+- The dividing line is **not urgency**. The first build of this deferred all
+  non-urgent work while you were at the keyboard, which meant a laptop sitting
+  idle all day for no reason: a coding agent in a background process costs you
+  nothing while you type. What costs you the machine is a task grabbing the
+  mouse or photographing the screen, and that is the only thing that waits.
 - Reads its own thresholds from config, so if it still gets warm you turn it
   down without touching code.
 

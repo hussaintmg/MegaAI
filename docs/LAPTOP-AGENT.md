@@ -6,8 +6,10 @@ for — Claude Code, Codex, OpenCode — handing work from one to the next as ea
 hits its limit.
 
 It is built around one promise: **the laptop stays yours**. While you are using
-it, only urgent work runs. When it gets hot, everything stops. When you walk
-away, the backlog drains.
+it, work that would take over the mouse, the keyboard or the screen waits —
+everything else carries on, because a background process does not disturb
+anyone. When it gets hot, everything stops. When you walk away, the whole
+backlog runs, including the work that needs the screen.
 
 ---
 
@@ -53,7 +55,8 @@ node apps\node\dist\index.js add "build the landing page" ^
 | --- | --- |
 | `--project` | the folder to work in — required, and the folder two tasks never share |
 | `--goal` | the bigger picture, carried into every handoff brief |
-| `--urgent` | run it even while you are at the keyboard |
+| `--interactive` | it needs the mouse, keyboard or screen — so it waits until you step away |
+| `--urgent` | run it now even though it will interrupt you (only matters for `--interactive`) |
 | `--open` | open the folder in VS Code when it is done |
 
 Then leave `run` going — or let the Scheduled Task do it.
@@ -83,9 +86,15 @@ rather than assuming that reaching the end means it worked.
 
 | Gear | When | What runs |
 | --- | --- | --- |
-| **full** | you have been away 3 minutes | up to 3 tasks at once |
-| **gentle** | you are at the keyboard | urgent work only, one at a time |
+| **full** | you have been away 3 minutes | everything, up to 3 at once — including work that takes over the screen |
+| **background** | you are at the keyboard | everything that stays out of your way, 2 at once. Only work needing the mouse/keyboard/screen waits |
 | **stop** | over 82°C, under 20% battery unplugged, or memory over 94% | nothing |
+
+The line between the two top gears is **not** how urgent a task is — it is
+whether it needs the human interface. A coding agent running in a background
+process costs you nothing while you type, so it keeps going. A task that grabs
+the mouse, focuses a window or photographs the screen makes the machine
+unusable while it runs, so that is the one that waits.
 
 Heat has hysteresis: once it stops for temperature it will not start again
 until the CPU is back under 72°C, so it cannot sit at the threshold all night
@@ -93,8 +102,8 @@ cycling on and off. Speeding up is held for 20 seconds; stopping is immediate.
 
 **If the machine cannot report idle time**, load stands in for the keyboard:
 after the same period below 12% CPU, it counts as you being away. Without this
-the agent would sit in `gentle` forever on any machine whose idle-time reading
-does not work, deferring the entire backlog silently.
+the agent would never reach `full` on any machine whose idle-time reading does
+not work, so work needing the screen would be deferred for ever, silently.
 
 Everything is turned down with environment variables rather than code:
 
@@ -103,6 +112,7 @@ Everything is turned down with environment variables rather than code:
 | `MEGAAI_HOT_C` | 82 | stop above this (the restart point moves with it) |
 | `MEGAAI_IDLE_SECONDS` | 180 | how long before you count as away |
 | `MEGAAI_MAX_TASKS` | 3 | how many at once when you are away |
+| `MEGAAI_BACKGROUND_TASKS` | 2 | how many at once while you are using the machine |
 | `MEGAAI_LOW_BATTERY_PCT` | 20 | stop below this on battery |
 | `MEGAAI_TICK_MS` | 5000 | how often it looks |
 | `MEGAAI_NODE_NAME` | the hostname | what it is called in the queue |

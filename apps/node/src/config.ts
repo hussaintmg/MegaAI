@@ -152,6 +152,8 @@ export function loadNodeConfig(
   if (idle !== undefined) thresholds.idleAfterSeconds = idle;
   const maxTasks = readNumber(env, 'MEGAAI_MAX_TASKS', notices, { min: 1, max: 8 });
   if (maxTasks !== undefined) thresholds.fullConcurrency = maxTasks;
+  const backgroundTasks = readNumber(env, 'MEGAAI_BACKGROUND_TASKS', notices, { min: 1, max: 8 });
+  if (backgroundTasks !== undefined) thresholds.backgroundConcurrency = backgroundTasks;
   const lowBattery = readNumber(env, 'MEGAAI_LOW_BATTERY_PCT', notices, { min: 0, max: 90 });
   if (lowBattery !== undefined) thresholds.lowBatteryPct = lowBattery;
 

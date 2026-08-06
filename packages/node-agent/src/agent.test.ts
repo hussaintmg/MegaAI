@@ -61,30 +61,30 @@ function suspendable() {
   return { handler, release, started };
 }
 
-test('it works while you are away and stays out of your way while you are here', async () => {
+test('it keeps working while you are here, and only screen work waits', async () => {
   const h = harness({ build: async () => ({ kind: 'done' }) });
   h.machine({ idleSeconds: 4 });
 
-  const nightly = await h.mesh.enqueue({ title: 'nightly rebuild', requires: ['shell'], payload: { kind: 'build' } });
-  const urgent = await h.mesh.enqueue({
-    title: 'send the client this file',
+  const coding = await h.mesh.enqueue({ title: 'nightly rebuild', requires: ['shell'], payload: { kind: 'build' } });
+  const onScreen = await h.mesh.enqueue({
+    title: 'open the app and look at it',
     requires: ['shell'],
-    urgent: true,
+    interactive: true,
     payload: { kind: 'build' },
   });
 
   await h.agent.start();
   await h.agent.drain();
 
-  assert.equal((await h.mesh.store.getTask(urgent.id))?.state, 'completed');
-  assert.equal((await h.mesh.store.getTask(nightly.id))?.state, 'pending');
-  assert.match((await h.mesh.explainWait(nightly.id)) ?? '', /deferred while you are using the machine/);
+  assert.equal((await h.mesh.store.getTask(coding.id))?.state, 'completed', 'a background build does not disturb you');
+  assert.equal((await h.mesh.store.getTask(onScreen.id))?.state, 'pending');
+  assert.match((await h.mesh.explainWait(onScreen.id)) ?? '', /needs the mouse and screen/);
 
-  // You walk away, and the backlog drains without being asked.
+  // You walk away, and the rest goes too.
   h.machine({ idleSeconds: 900 });
   await h.agent.tick();
   await h.agent.drain();
-  assert.equal((await h.mesh.store.getTask(nightly.id))?.state, 'completed');
+  assert.equal((await h.mesh.store.getTask(onScreen.id))?.state, 'completed');
 });
 
 test('a task cut short by heat goes back with its progress, and is not counted as a failure', async () => {

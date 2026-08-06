@@ -5,7 +5,7 @@
  *   megaai-node run                    join the mesh and work
  *   megaai-node status                 what it can see right now
  *   megaai-node tasks                  everything in the queue, with ids
- *   megaai-node add "<task>" --project <dir> [--goal "<goal>"] [--urgent]
+ *   megaai-node add "<task>" --project <dir> [--goal "<goal>"] [--interactive] [--urgent]
  *   megaai-node cancel <id|title>      take one off the queue
  *   megaai-node install [--dry-run]    make it start by itself at logon
  *   megaai-node uninstall              undo that
@@ -251,7 +251,7 @@ async function add(config: NodeConfig, args: string[]): Promise<void> {
   const description = args.find((entry) => !entry.startsWith('--'));
   const projectDir = valueOf(args, '--project');
   if (!description || !projectDir) {
-    say(red('Usage: megaai-node add "<what to do>" --project <folder> [--goal "<the bigger goal>"] [--urgent]'));
+    say(red('Usage: megaai-node add "<what to do>" --project <folder> [--goal "<the bigger goal>"] [--interactive] [--urgent]'));
     process.exitCode = 1;
     return;
   }
@@ -275,15 +275,23 @@ async function add(config: NodeConfig, args: string[]): Promise<void> {
     projectDir: resolved,
     openEditor: args.includes('--open'),
   };
+  // Interactive means "needs the mouse, keyboard or screen" — the only kind of
+  // work that has to wait while you are using the machine. Everything else
+  // runs regardless, because a background process does not disturb anyone.
+  const interactive = args.includes('--interactive');
   const task = await mesh.enqueue({
     title: description,
     payload: payload as unknown as JsonObject,
     requires: ['shell'],
+    interactive,
     urgent: args.includes('--urgent'),
   });
   await close();
 
   say(`${green('Queued')} "${task.title}" in ${resolved}`);
+  if (interactive) {
+    say(dim('It needs the screen, so it waits until you step away from the machine (--urgent overrides that).'));
+  }
   say(dim(`It is in ${where}. Run "megaai-node run" (or leave it running) and it will be picked up.`));
 }
 

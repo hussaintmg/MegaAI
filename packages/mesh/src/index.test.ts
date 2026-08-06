@@ -81,28 +81,39 @@ test('a node that stops reporting loses the task, and its progress is kept', asy
   assert.deepEqual(again?.checkpoint, { step: 'installed dependencies' });
 });
 
-test('gentle gear takes only urgent work — the laptop stops competing with you', async () => {
+test('while you are at the machine, only work that needs the screen waits', async () => {
+  // The rule that matters: a coding agent in a background process costs you
+  // nothing while you type. What disturbs you is a task taking the mouse.
   const { m } = mesh();
   await laptop(m);
-  await m.enqueue({ title: 'nightly rebuild', requires: ['shell'] });
-  const urgent = await m.enqueue({ title: 'send the client this file', requires: ['shell'], urgent: true });
+  const coding = await m.enqueue({ title: 'nightly rebuild', requires: ['shell'] });
+  const onScreen = await m.enqueue({ title: 'open the app and check the layout', requires: ['shell'], interactive: true });
 
-  await m.heartbeat('laptop', { gear: 'gentle' });
-  const claimed = await m.claimNext('laptop');
-  assert.equal(claimed?.id, urgent.id, 'only the urgent one gets through while you are working');
+  await m.heartbeat('laptop', { gear: 'background', concurrency: 2 });
+  assert.equal((await m.claimNext('laptop'))?.id, coding.id, 'background work carries on');
 
-  const deferred = (await m.store.listTasks()).find((t) => t.title === 'nightly rebuild');
-  assert.match(await m.explainWait(deferred!.id) ?? '', /deferred while you are using the machine/);
+  assert.match(
+    (await m.explainWait(onScreen.id)) ?? '',
+    /needs the mouse and screen, so it waits until you step away/,
+  );
 
-  // You walk away; the backlog drains.
+  // You walk away; the interactive one runs too.
   await m.heartbeat('laptop', { gear: 'full', concurrency: 3 });
-  assert.equal((await m.claimNext('laptop'))?.title, 'nightly rebuild');
+  assert.equal((await m.claimNext('laptop'))?.id, onScreen.id);
+});
+
+test('something you asked for right now interrupts you on purpose', async () => {
+  const { m } = mesh();
+  await laptop(m);
+  const now = await m.enqueue({ title: 'send this on WhatsApp', requires: ['whatsapp'], interactive: true, urgent: true });
+  await m.heartbeat('laptop', { gear: 'background', concurrency: 2 });
+  assert.equal((await m.claimNext('laptop'))?.id, now.id, 'you asked for it now — being interrupted is the point');
 });
 
 test('a paused node takes nothing at all', async () => {
   const { m } = mesh();
   await laptop(m);
-  await m.enqueue({ title: 'anything', requires: ['shell'], urgent: true });
+  await m.enqueue({ title: 'anything', requires: ['shell'], interactive: true, urgent: true });
   await m.heartbeat('laptop', { gear: 'stop', health: { temperatureC: 91 } });
   assert.equal(await m.claimNext('laptop'), undefined, 'too hot to work is a real answer');
 });
@@ -235,8 +246,8 @@ test('the snapshot shows who is online and what the queue is doing', async () =>
 test('registering the same node twice updates it instead of duplicating it', async () => {
   const { m } = mesh();
   await laptop(m);
-  await m.heartbeat('laptop', { gear: 'gentle' });
+  await m.heartbeat('laptop', { gear: 'background' });
   const again = await m.register({ id: 'laptop', name: 'Laptop', kind: 'laptop', capabilities: ['shell'] });
-  assert.equal(again.gear, 'gentle', 'a re-register does not reset the gear it chose');
+  assert.equal(again.gear, 'background', 'a re-register does not reset the gear it chose');
   assert.equal((await m.store.listNodes()).length, 1);
 });
