@@ -86,6 +86,9 @@
       "path": "packages/mesh"
     },
     {
+      "path": "packages/coders"
+    },
+    {
       "path": "packages/context"
     },
     {

@@ -1,0 +1,13 @@
+{
+  "name": "@megaai/coders",
+  "version": "0.1.0",
+  "description": "Drives local coding agents (Claude Code, Codex, OpenCode) as workers: quota tracking, handoff with context, resume when a limit resets",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@megaai/types": "0.1.0", "@megaai/utils": "0.1.0" },
+  "license": "MIT"
+}

@@ -125,7 +125,32 @@ Planned fleet, each with its own prompt, tools and verification step:
 Every build agent is followed by a verify agent that can **send the work back**.
 That loop — not a better prompt — is what raises quality.
 
-### 2.6 Multi-turn agents
+### 2.6 Driving the coding agents you already pay for
+
+You have Claude Code, Codex and OpenCode. They are better at writing code than
+anything MegaAI would prompt from scratch — so MegaAI stops competing with them
+and becomes their shift manager instead.
+
+- **Their CLIs, not their editor windows.** `claude -p`, `codex exec` and
+  `opencode run` each take a prompt, a working directory and a session to
+  resume. GUI automation has none of that and breaks on every update. Apps with
+  no CLI fall back to the existing screen-and-click path.
+- **Quota is tracked per agent.** Their output is watched for "usage limit
+  reached" and the reset time it usually carries. The patterns are deliberately
+  narrow — parking a working agent over a type error would waste the night.
+- **A limit costs a handoff, not the task.** The next agent receives a brief
+  that says *do not start over*: the goal, what each previous agent already
+  did, the files that changed on disk, and the last thing the stopped agent
+  reported. A handoff that just repeats the original prompt makes the new agent
+  redo the work — and often undo it.
+- **When all of them are spent, the work waits.** The earliest reset becomes
+  the task's `notBefore`, so the night resumes by itself rather than needing
+  you to notice.
+- **Projects run in parallel**, one agent per folder — with the session
+  remembered per project, so a second turn on the same codebase resumes the
+  conversation instead of re-explaining it.
+
+### 2.7 Multi-turn agents
 
 The single biggest quality lever, and the one thing still missing after all the
 fixes so far: an agent gets **one** shot per task. It writes, and never sees
@@ -135,7 +160,7 @@ The loop: propose → run tools → read the real result (compiler errors, test
 output, the screenshot) → correct → repeat, up to a step budget. This is how a
 type error gets fixed instead of shipped.
 
-### 2.7 Inputs: voice, files, images
+### 2.8 Inputs: voice, files, images
 
 - **Voice**: recorded on the phone or laptop, transcribed by whichever provider
   is configured (Gemini takes audio directly).
@@ -154,7 +179,8 @@ one being finished.
 | --- | --- | --- | --- |
 | **1** | **Mesh core** — node registry, heartbeats, durable task queue with leases, capability routing, live change-stream + SSE | See every node's status live; queue a task with the laptop off and watch it run when the laptop wakes | ~1 week |
 | **2** | **Laptop agent** — autostart, resource guard, three gears, crash-resume, local Chrome control | Close the lid mid-task and have it continue after reboot; watch it back off while you work | ~1 week |
-| **3** | **Multi-turn agents + fleet** — the propose→verify→correct loop, and the specialist agents above | Get code that compiles because the agent saw the error | ~2 weeks |
+| **3** | **Coder relay** — drive Claude Code / Codex / OpenCode, track quota, hand off with context, resume at reset | Leave it overnight and find work done by three agents in turn, not one that stopped at midnight | ~1 week |
+| **3b** | **Multi-turn agents + fleet** — the propose→verify→correct loop, and the specialist agents above | Get code that compiles because the agent saw the error | ~2 weeks |
 | **4** | **Phone node** — PWA for control and live logs; Termux agent for phone-only work (SMS, WhatsApp, camera) | Say "email this to the client" from your phone and have it happen | ~1 week |
 | **5** | **Full delivery** — repo creation, push, Vercel deploy, then open the live URL and verify it really works | One sentence in, a live verified URL out | ~1 week |
 | **6** | **Voice, files, image OCR** | Talk to it | ~1 week |
