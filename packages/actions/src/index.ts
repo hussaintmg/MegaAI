@@ -30,19 +30,75 @@ export interface ParsedProposal {
   unparsed?: boolean;
 }
 
+/**
+ * File blocks: source code delivered outside the JSON, unescaped.
+ *
+ *   ===FILE app/page.tsx===
+ *   export default function Page() { … }
+ *   ===END===
+ *
+ * A JSON string is the wrong container for a source file. One unescaped
+ * newline invalidates the entire reply — every other file in it included — and
+ * a reply cut off mid-file loses the ones after it too. A block needs no
+ * escaping at all, and each completed block stands on its own.
+ */
+export interface ExtractedFile {
+  path: string;
+  content: string;
+  /** The closing marker never arrived — the reply stopped inside this file. */
+  unterminated?: boolean;
+}
+
+/** Pull every file block out of a reply, in order. */
+export function extractFileBlocks(text: string): ExtractedFile[] {
+  const files: ExtractedFile[] = [];
+  // `\Z` is not JavaScript; match an explicit terminator or run to the end.
+  const pattern = /^[ \t]*={3,}\s*FILE\s+(.+?)\s*={3,}[ \t]*\r?\n([\s\S]*?)(?=^[ \t]*={3,}\s*(?:END|FILE)\b|$(?![\s\S]))/gm;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const path = (match[1] ?? '').trim();
+    if (!path || path.length > 400) continue;
+    const after = text.slice(match.index + match[0].length);
+    const terminated = /^[ \t]*={3,}\s*END\b/m.test(after.split('\n')[0] ?? '') || /^[ \t]*={3,}\s*END\b/.test(after);
+    // Strip a single trailing newline the marker line contributed.
+    files.push({
+      path: path.replace(/^["'`]|["'`]$/g, ''),
+      content: (match[2] ?? '').replace(/\r?\n$/, ''),
+      ...(terminated ? {} : { unterminated: true }),
+    });
+  }
+  return files;
+}
+
 /** Parse the action protocol out of free-form model output. */
 export function parseProposal(text: string): ParsedProposal {
+  const blocks = extractFileBlocks(text);
+  // The JSON is whatever comes before the first block; a block's contents can
+  // easily contain braces of its own.
+  const firstBlock = text.search(/^[ \t]*={3,}\s*FILE\s+/m);
+  const jsonPart = firstBlock === -1 ? text : text.slice(0, firstBlock);
+
   let repaired = false;
-  let parsed = extractJsonObject(text);
+  let parsed = extractJsonObject(jsonPart);
   if (!isPlainObject(parsed)) {
     // Source code inside a JSON string breaks in two predictable ways: raw
     // newlines the model did not escape, and a reply cut off at the output
     // ceiling mid-file. Both are recoverable; throwing the reply away is not.
-    parsed = repairJsonObject(text);
+    parsed = repairJsonObject(jsonPart);
     repaired = isPlainObject(parsed);
   }
   if (!isPlainObject(parsed)) {
-    return { summary: text.trim().slice(0, 2_000), actions: [], unparsed: true };
+    // Blocks alone are enough: the files are the work, and a reply that got
+    // them right should not be thrown away over a malformed preamble.
+    const fromBlocks = fileActions(blocks);
+    if (fromBlocks.length > 0) {
+      return {
+        summary: `Wrote ${fromBlocks.length} file(s): ${fromBlocks.map((a) => a.input.path).join(', ')}.`,
+        actions: fromBlocks,
+        repaired: true,
+      };
+    }
+    return { summary: jsonPart.trim().slice(0, 2_000), actions: [], unparsed: true };
   }
   const objectValue = parsed as JsonObject;
   const actions: ActionRequest[] = [];
@@ -60,6 +116,11 @@ export function parseProposal(text: string): ParsedProposal {
       });
     }
   }
+  // Blocks come first: a file the model wrote out in full beats the same path
+  // half-declared in the JSON.
+  const blockActions = fileActions(blocks);
+  const merged = [...blockActions, ...actions.filter((a) => !(a.tool === 'fs.write' && blockActions.some((b) => b.input.path === a.input.path)))];
+
   return {
     thoughts: typeof objectValue.thoughts === 'string' ? objectValue.thoughts : undefined,
     // A repaired reply often lost its trailing "summary" key, so fall back to
@@ -68,11 +129,22 @@ export function parseProposal(text: string): ParsedProposal {
       typeof objectValue.summary === 'string'
         ? objectValue.summary
         : repaired
-          ? `Reply was truncated; recovered ${actions.length} action(s).`
-          : text.trim().slice(0, 2_000),
-    actions,
-    ...(repaired ? { repaired: true } : {}),
+          ? `Reply was truncated; recovered ${merged.length} action(s).`
+          : jsonPart.trim().slice(0, 2_000),
+    actions: merged,
+    ...(repaired || blocks.some((b) => b.unterminated) ? { repaired: true } : {}),
   };
+}
+
+/** Complete file blocks become fs.write actions; a cut-off one is dropped. */
+function fileActions(blocks: readonly ExtractedFile[]): ActionRequest[] {
+  return blocks
+    .filter((block) => !block.unterminated)
+    .map((block) => ({
+      tool: 'fs.write',
+      input: { path: block.path, content: block.content } as JsonObject,
+      reason: 'file block',
+    }));
 }
 
 export interface ActionEngineOptions {

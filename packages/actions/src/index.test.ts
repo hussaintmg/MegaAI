@@ -155,3 +155,91 @@ test('a repaired reply that lost its summary describes what survived', () => {
   assert.match(proposal.summary, /truncated; recovered 1 action/);
   assert.doesNotMatch(proposal.summary, /"thoughts"/, 'raw JSON never reaches the report');
 });
+
+test('file blocks deliver code without escaping anything', () => {
+  // The reason this format exists: a `.tsx` file full of newlines, quotes and
+  // backslashes goes through untouched, where a JSON string would have needed
+  // every one of them escaped correctly or lost the whole reply.
+  const reply = `{"summary":"scaffolded the hero"}
+
+===FILE app/page.tsx===
+'use client';
+import { motion } from 'framer-motion';
+
+export default function Page() {
+  const label = "It's a \\"3D\\" car";
+  return <motion.h1 animate={{ opacity: 1 }}>{label}</motion.h1>;
+}
+===END===
+
+===FILE lib/data.ts===
+export const cars = [{ id: 'gt', name: 'GT' }];
+===END===
+`;
+  const proposal = parseProposal(reply);
+  assert.equal(proposal.unparsed, undefined);
+  assert.equal(proposal.summary, 'scaffolded the hero');
+  assert.equal(proposal.actions.length, 2);
+  assert.deepEqual(proposal.actions.map((a) => a.input.path), ['app/page.tsx', 'lib/data.ts']);
+  const page = String(proposal.actions[0]?.input.content);
+  assert.match(page, /^'use client';/);
+  assert.match(page, /const label = "It's a \\"3D\\" car";/);
+  assert.match(page, /<motion\.h1 animate=\{\{ opacity: 1 \}\}>/);
+  assert.doesNotMatch(page, /===END===/);
+  assert.equal(String(proposal.actions[1]?.input.content), "export const cars = [{ id: 'gt', name: 'GT' }];");
+});
+
+test('a reply cut off inside a block keeps the files that finished', () => {
+  const reply = `{"summary":"writing pages"}
+
+===FILE app/page.tsx===
+export default function Page() { return null; }
+===END===
+
+===FILE app/about/page.tsx===
+export default function About() {
+  return <main>half a fi`;
+  const proposal = parseProposal(reply);
+  assert.equal(proposal.actions.length, 1, 'the finished file survives; the cut-off one is dropped');
+  assert.equal(proposal.actions[0]?.input.path, 'app/page.tsx');
+  assert.equal(proposal.repaired, true, 'and the truncation is flagged');
+});
+
+test('blocks survive even when the JSON preamble is unusable', () => {
+  const reply = `Here are the files you asked for! {not json at all
+
+===FILE README.md===
+# Velocity 3D
+===END===
+`;
+  const proposal = parseProposal(reply);
+  assert.equal(proposal.unparsed, undefined, 'the files are the work — do not throw them away');
+  assert.equal(proposal.actions.length, 1);
+  assert.equal(proposal.actions[0]?.input.content, '# Velocity 3D');
+});
+
+test('a block wins over the same path declared in the JSON', () => {
+  const reply = `{"summary":"s","actions":[{"tool":"fs.write","input":{"path":"a.ts","content":"stale"}},{"tool":"git.commit","input":{"message":"m"}}]}
+
+===FILE a.ts===
+export const fresh = 1;
+===END===
+`;
+  const proposal = parseProposal(reply);
+  assert.equal(proposal.actions.length, 2, 'the duplicate fs.write is dropped, git.commit is kept');
+  assert.equal(proposal.actions[0]?.input.content, 'export const fresh = 1;');
+  assert.equal(proposal.actions[1]?.tool, 'git.commit');
+});
+
+test('a JSON body containing braces is not confused by a later block', () => {
+  const reply = `{"summary":"wrote config","actions":[]}
+
+===FILE next.config.mjs===
+const nextConfig = { reactStrictMode: true, images: { domains: ['a.test'] } };
+export default nextConfig;
+===END===
+`;
+  const proposal = parseProposal(reply);
+  assert.equal(proposal.summary, 'wrote config');
+  assert.match(String(proposal.actions[0]?.input.content), /images: \{ domains: \['a\.test'\] \}/);
+});

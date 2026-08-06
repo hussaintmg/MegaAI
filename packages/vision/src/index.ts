@@ -301,6 +301,28 @@ const PAGE_A11Y = `(() => {
   return issues;
 })()`;
 
+/**
+ * Scroll the whole page in steps, then return to the top.
+ *
+ * Every reveal-on-scroll library — GSAP ScrollTrigger, framer-motion's
+ * useInView, IntersectionObserver by hand — leaves its content hidden until
+ * the viewport reaches it. Without this, a full-page screenshot of a modern
+ * marketing site is mostly blank space where the sections should be.
+ */
+const SCROLL_THROUGH = `(async () => {
+  const step = Math.max(200, window.innerHeight * 0.8);
+  const pause = () => new Promise((r) => setTimeout(r, 120));
+  for (let y = 0; y < document.body.scrollHeight; y += step) {
+    window.scrollTo(0, y);
+    await pause();
+  }
+  window.scrollTo(0, document.body.scrollHeight);
+  await pause();
+  window.scrollTo(0, 0);
+  await pause();
+  return document.body.scrollHeight;
+})()`;
+
 const PAGE_PERF = `(() => {
   const nav = performance.getEntriesByType('navigation')[0];
   return {
@@ -398,6 +420,8 @@ export class BrowserTestDriver {
       const network: FailedRequest[] = [];
       await this.load(page, input, errors, warnings, network);
 
+      await this.settle(page);
+
       const responsive: ResponsiveResult[] = [];
       for (const vp of VIEWPORTS) {
         await page.setViewportSize({ width: vp.width, height: vp.height });
@@ -448,10 +472,32 @@ export class BrowserTestDriver {
     });
   }
 
+  /**
+   * Let the page finish arriving before judging it.
+   *
+   * A screenshot taken the instant load fires catches a scroll-animated site
+   * mid-nothing: framer-motion entrances half-faded, and every GSAP
+   * ScrollTrigger section still at `opacity: 0` because nobody has scrolled.
+   * The first real preview of a three.js + GSAP site came back with an empty
+   * band where the content was. Scrolling the whole page fires the triggers,
+   * and a pause afterwards lets the transitions land.
+   */
+  private async settle(page: PwPage): Promise<void> {
+    try {
+      await page.evaluate(SCROLL_THROUGH);
+      // Long enough for a typical 0.6–0.8s entrance to complete. Done inside
+      // the page so it needs nothing beyond the PwPage surface.
+      await page.evaluate('new Promise((r) => setTimeout(r, 1200))');
+    } catch {
+      // A page that cannot be scrolled is simply photographed as it is.
+    }
+  }
+
   async screenshot(input: AuditInput): Promise<{ format: 'png'; base64: string }> {
     return this.withPage(input, async (page) => {
       const errors: string[] = [];
       await this.load(page, input, errors, []);
+      await this.settle(page);
       const buffer = await page.screenshot({ type: 'png', fullPage: true });
       return { format: 'png' as const, base64: buffer.toString('base64') };
     });

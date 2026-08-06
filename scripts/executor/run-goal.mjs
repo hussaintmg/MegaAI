@@ -14,6 +14,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { collectContents, walkFiles } from './collect.mjs';
+import { finalizeDelivery } from './finalize.mjs';
 import process from 'node:process';
 
 const PLATFORM_URL = (process.env.PLATFORM_URL ?? '').replace(/\/+$/, '');
@@ -214,34 +215,61 @@ async function main() {
   const reportPath = join(result.workspaceDir, 'MEGAAI_REPORT.md');
   if (existsSync(reportPath)) report = readFileSync(reportPath, 'utf8');
 
-  // The live site, if the devops agent got one. This is the answer to "where
-  // can I actually look at it", so it travels as its own field rather than
-  // being buried in a report the reader has to search.
-  let deployment;
-  const deployPath = join(result.workspaceDir, '.megaai-deploy.json');
-  if (existsSync(deployPath)) {
-    try {
-      const record = JSON.parse(readFileSync(deployPath, 'utf8'));
-      if (record?.url) {
-        deployment = {
-          url: String(record.url),
-          target: String(record.target ?? ''),
-          simulated: record.simulated !== false,
-          ...(record.inspectorUrl ? { inspectorUrl: String(record.inspectorUrl) } : {}),
-          ...(record.error ? { error: String(record.error) } : {}),
-        };
-        const line = deployment.simulated
-          ? `Deployment was simulated — ${deployment.url} does not exist. Save a Vercel token in Settings for a real one.`
-          : `Live at ${deployment.url}`;
-        console.log(`executor: ${line}`);
-        await postEvent('deploy', line);
+  // Build it, photograph it and put it online — here, not inside an agent's
+  // discretion. Leaving these to a model meant a run could finish with no
+  // picture and no link and nothing saying why.
+  const { PreviewRunner, VisionTester } = await import(
+    new URL('../../packages/vision/dist/index.js', import.meta.url).href
+  );
+  const { collectDeployFiles, deployToVercel } = await import(
+    new URL('../../packages/deploy/dist/index.js', import.meta.url).href
+  );
+  const finalLog = (event, message) => {
+    console.log(`executor: ${message}`);
+    return postEvent(event, message);
+  };
+  const finalized = await finalizeDelivery({
+    workspaceDir: result.workspaceDir,
+    vercelToken: settings.deploy?.vercelToken,
+    log: finalLog,
+    previewRunner: new PreviewRunner(
+      { enabled: true, allowlist: ['node', 'npm', 'git', 'ls', 'cat'] },
+      new VisionTester({ preferBrowser: true }),
+    ),
+    deploy: {
+      collect: collectDeployFiles,
+      run: deployToVercel,
+      projectName: (goal || 'megaai-app')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 52) || 'megaai-app',
+    },
+  }).catch(async (err) => {
+    await postEvent('finalize', `Could not finish the delivery: ${err instanceof Error ? err.message : String(err)}`);
+    return { preview: undefined, deployment: undefined };
+  });
+
+  let deployment = finalized.deployment;
+  // An agent may have recorded its own (usually simulated) deploy; only fall
+  // back to it when the real one did not happen.
+  if (!deployment) {
+    const deployPath = join(result.workspaceDir, '.megaai-deploy.json');
+    if (existsSync(deployPath)) {
+      try {
+        const record = JSON.parse(readFileSync(deployPath, 'utf8'));
+        if (record?.url) {
+          deployment = {
+            url: String(record.url),
+            target: String(record.target ?? ''),
+            simulated: record.simulated !== false,
+          };
+        }
+      } catch {
+        // A malformed record is not worth failing the run over.
       }
-    } catch {
-      // A malformed record is not worth failing the run over.
     }
   }
-  const files = walkFiles(result.workspaceDir);
-  const contents = collectContents(result.workspaceDir, files);
   const usage = megaai.sessions.usage();
 
   // 4. Say who actually wrote this. A run where the mock served every request
@@ -249,6 +277,10 @@ async function main() {
   // generic scaffolding with the goal's words pasted into a <h1>. Reporting
   // that as a success is the bug behind "the run finished, so where is my
   // website?". A delivery nobody's model touched is not a delivery.
+  // Walked after finalisation, so the screenshots it just took are included.
+  const files = walkFiles(result.workspaceDir);
+  const contents = collectContents(result.workspaceDir, files);
+
   const tallies = megaai.sessions.providerTallies();
   const real = tallies.filter((t) => t.kind !== 'mock');
   const mockRequests = tallies.find((t) => t.kind === 'mock')?.requests ?? 0;
@@ -276,7 +308,19 @@ async function main() {
     console.error(`executor: ${placeholderError}`);
   }
 
-  const ok = result.project.status === 'completed' && !mockOnly;
+  // A delivery that does not build is not a delivery, whatever the tasks
+  // reported. This is checked here because it is the only place that actually
+  // ran `npm install` and the real build command.
+  const buildStep = finalized.preview?.steps.find((step) => step.name === 'build' || step.name === 'install');
+  const buildBroken = Boolean(buildStep && !buildStep.ok);
+  if (buildBroken) {
+    await postEvent(
+      'build',
+      `The delivered app does not ${buildStep.name === 'install' ? 'install' : 'build'} — reporting this run as failed.`,
+    );
+  }
+
+  const ok = result.project.status === 'completed' && !mockOnly && !buildBroken;
 
   await postFinal({
     status: ok ? 'completed' : 'failed',
@@ -288,7 +332,13 @@ async function main() {
     usage: { requests: usage.requests, tokens: usage.inputTokens + usage.outputTokens, costUsd: usage.estimatedCostUsd },
     ...(ok
       ? {}
-      : { error: placeholderError ?? `project finished with status "${result.project.status}"` }),
+      : {
+          error:
+            placeholderError ??
+            (buildBroken
+              ? `The delivered app does not ${buildStep.name === 'install' ? 'install' : 'build'}: ${(buildStep.output ?? '').slice(-800)}`
+              : `project finished with status "${result.project.status}"`),
+        }),
   });
   await drainEvents();
 
