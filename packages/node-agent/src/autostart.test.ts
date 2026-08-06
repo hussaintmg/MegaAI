@@ -37,6 +37,29 @@ test('paths with spaces are quoted, and the XML is escaped', () => {
   assert.match(xml, /<UserId>DESKTOP-7\\me<\/UserId>/);
 });
 
+test('the task XML must be written UTF-16 *with* a byte-order mark', () => {
+  // Found on a real Windows 11 machine: writing UTF-16 without the mark makes
+  // schtasks read the bytes as ANSI, see `<` then a NUL, and reject the file
+  // with "The task XML is malformed. (1,2)::ERROR: one root element". The
+  // encoding travels with the plan so the caller cannot get this wrong.
+  const plan = autostartPlan(OPTIONS);
+  assert.equal(plan.files[0]?.encoding, 'utf16le-bom');
+  assert.match(plan.files[0]?.contents ?? '', /^<\?xml version="1\.0" encoding="UTF-16"\?>/);
+});
+
+test('every plan can be checked afterwards instead of assumed', () => {
+  // The installer printed "Registered ..." on top of two schtasks errors. The
+  // only honest answer comes from asking the operating system.
+  for (const platform of ['win32', 'linux', 'darwin'] as NodeJS.Platform[]) {
+    const plan = autostartPlan({ ...OPTIONS, platform, execPath: '/usr/bin/node', scriptPath: '/a/b.js' });
+    assert.ok(plan.verifyCommand, `${platform} needs a way to confirm the install actually happened`);
+  }
+  assert.deepEqual(autostartPlan(OPTIONS).verifyCommand, {
+    command: 'schtasks.exe',
+    args: ['/Query', '/TN', 'MegaAI Node Agent'],
+  });
+});
+
 test('installing on Windows registers the task and starts it now', () => {
   const plan = autostartPlan({ ...OPTIONS, stateDir: 'C:\\Users\\me\\AppData\\Local\\MegaAI' });
   assert.equal(plan.files[0]?.path, 'C:\\Users\\me\\AppData\\Local\\MegaAI\\megaai-node-agent.xml');

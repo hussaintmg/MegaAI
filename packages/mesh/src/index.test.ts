@@ -171,6 +171,33 @@ test('parking is not failing — the attempt is handed back and the reason is ke
   assert.equal((await m.claimNext('laptop'))?.id, task.id, 'it comes back on its own');
 });
 
+test('a task can be taken off the queue, including one already being worked on', async () => {
+  // A queue you cannot remove things from is a queue you stop reading.
+  const { m } = mesh();
+  await laptop(m);
+  const mistake = await m.enqueue({ title: '...', requires: ['shell'] });
+  const running = await m.enqueue({ title: 'real work', requires: ['shell'] });
+
+  const cancelled = await m.cancel(mistake.id, 'queued by mistake');
+  assert.equal(cancelled.state, 'cancelled');
+  assert.match(cancelled.error ?? '', /queued by mistake/);
+
+  await m.claimNext('laptop');
+  await m.cancel(running.id, 'changed my mind');
+  assert.equal((await m.store.getTask(running.id))?.claimedBy, undefined);
+
+  assert.equal(await m.claimNext('laptop'), undefined, 'and neither is offered again');
+});
+
+test('a finished task cannot be cancelled — that would rewrite what happened', async () => {
+  const { m } = mesh();
+  await laptop(m);
+  const task = await m.enqueue({ title: 'done already', requires: ['shell'] });
+  await m.claimNext('laptop');
+  await m.complete(task.id, 'laptop');
+  await assert.rejects(m.cancel(task.id), /already finished/);
+});
+
 test('only the holder may report on a task', async () => {
   const { m } = mesh();
   await laptop(m);

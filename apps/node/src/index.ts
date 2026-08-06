@@ -4,7 +4,9 @@
  *
  *   megaai-node run                    join the mesh and work
  *   megaai-node status                 what it can see right now
+ *   megaai-node tasks                  everything in the queue, with ids
  *   megaai-node add "<task>" --project <dir> [--goal "<goal>"] [--urgent]
+ *   megaai-node cancel <id|title>      take one off the queue
  *   megaai-node install [--dry-run]    make it start by itself at logon
  *   megaai-node uninstall              undo that
  *
@@ -118,6 +120,16 @@ function buildAgent(config: NodeConfig, mesh: Mesh, log: (line: string) => void)
   return { agent, pool, guard, sample, found, probe };
 }
 
+/** Give the machine probe a chance to say something before judging it silent. */
+async function waitForProbe(probe: { latest: () => Record<string, unknown> }, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (Object.keys(probe.latest()).length > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return Object.keys(probe.latest()).length > 0;
+}
+
 function gitStatus(projectDir: string): string {
   const result = spawnSync('git', ['status', '--short'], { cwd: projectDir, encoding: 'utf8' });
   return result.stdout ?? '';
@@ -170,7 +182,11 @@ async function status(config: NodeConfig): Promise<void> {
 
   // One reading tells us nothing about CPU load; the second is the real one.
   sample();
-  await new Promise((resolve) => setTimeout(resolve, 700));
+  // And on Windows the probe is a PowerShell that has to compile a P/Invoke
+  // before its first line — a fixed short wait reports "idle time not
+  // readable" on a machine that reads it perfectly well, which is a lie about
+  // the one signal the gear depends on.
+  const probeAnswered = await waitForProbe(probe, 12_000);
   const reading = sample();
   const decision = guard.decide(reading);
   probe.stop();
@@ -190,6 +206,14 @@ async function status(config: NodeConfig): Promise<void> {
   say(
     `  coders       ${found.installed.length > 0 ? green(found.installed.join(', ')) : red('none installed — coding tasks will wait')}`,
   );
+  if (!probeAnswered) {
+    say(
+      yellow(
+        '  probe        nothing reported in 12s — this machine cannot tell whether you are at the keyboard,\n' +
+          '               so the agent falls back to judging by CPU load. That works; it is just less exact.',
+      ),
+    );
+  }
 
   const snapshot = await mesh.snapshot();
   say();
@@ -240,13 +264,66 @@ async function add(config: NodeConfig, args: string[]): Promise<void> {
   say(dim(`It is in ${where}. Run "megaai-node run" (or leave it running) and it will be picked up.`));
 }
 
+async function tasks(config: NodeConfig): Promise<void> {
+  const { store, close } = await openStore(config);
+  const mesh = new Mesh({ store });
+  const all = await store.listTasks();
+  if (all.length === 0) {
+    say(dim('Nothing in the queue.'));
+    await close();
+    return;
+  }
+  for (const task of all) {
+    const mark =
+      task.state === 'completed' ? green('✓') : task.state === 'failed' ? red('✗') : task.state === 'cancelled' ? dim('–') : yellow('·');
+    say(`${mark} ${dim(task.id)}  ${task.title}  ${dim(`(${task.state})`)}`);
+    const why = task.state === 'pending' ? await mesh.explainWait(task.id) : undefined;
+    if (why) say(dim(`           ${why}`));
+  }
+  say();
+  say(dim('Remove one with: megaai-node cancel <id or part of the title>'));
+  await close();
+}
+
+async function cancel(config: NodeConfig, args: string[]): Promise<void> {
+  const needle = args.find((entry) => !entry.startsWith('--'));
+  if (!needle) {
+    say(red('Usage: megaai-node cancel <id or part of the title>'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const { store, close } = await openStore(config);
+  const mesh = new Mesh({ store });
+  const open = (await store.listTasks()).filter((task) => task.state !== 'completed' && task.state !== 'cancelled');
+  const matches = open.filter((task) => task.id.startsWith(needle) || task.title.includes(needle));
+
+  if (matches.length === 0) {
+    say(yellow(`Nothing open matches "${needle}". Run "megaai-node tasks" to see what is there.`));
+    process.exitCode = 1;
+  } else if (matches.length > 1) {
+    // Cancelling the wrong task silently is worse than asking again.
+    say(yellow(`"${needle}" matches ${matches.length} tasks — be more specific:`));
+    for (const task of matches) say(`  ${dim(task.id)}  ${task.title}`);
+    process.exitCode = 1;
+  } else {
+    const task = matches[0]!;
+    await mesh.cancel(task.id, 'cancelled from the command line');
+    say(`${green('Cancelled')} "${task.title}"`);
+  }
+  await close();
+}
+
 function install(config: NodeConfig, args: string[]): void {
+  const domain = process.env['USERDOMAIN'];
+  const user = process.env['USERNAME'];
   const plan = autostartPlan({
     execPath: process.execPath,
     scriptPath: path.resolve(process.argv[1] ?? 'index.js'),
     args: ['run'],
     workingDir: process.cwd(),
     stateDir: config.stateDir,
+    ...(user ? { userId: domain ? `${domain}\\${user}` : user } : {}),
   });
 
   say(bold(`Setting up MegaAI to start by itself (${plan.platform})`));
@@ -260,19 +337,48 @@ function install(config: NodeConfig, args: string[]): void {
 
   for (const file of plan.files) {
     mkdirSync(path.dirname(file.path), { recursive: true });
-    // schtasks reads task XML as UTF-16; anything else is rejected outright.
-    writeFileSync(file.path, file.contents, plan.platform === 'win32' ? 'utf16le' : 'utf8');
+    // The byte-order mark is what tells schtasks the file is UTF-16 at all.
+    // Without it, it reads the bytes as ANSI and rejects the task as malformed
+    // at line 1, column 2 — which is `<` followed by a NUL.
+    const contents = file.encoding === 'utf16le-bom' ? `\uFEFF${file.contents}` : file.contents;
+    writeFileSync(file.path, contents, file.encoding === 'utf16le-bom' ? 'utf16le' : 'utf8');
   }
+
+  const failed: string[] = [];
   for (const command of plan.commands) {
     const result = spawnSync(command.command, command.args, { stdio: 'inherit' });
-    if (result.status !== 0 && result.status !== null) {
-      say(yellow(`  ${command.command} exited with ${result.status} — see above`));
-    }
+    if (result.error) failed.push(`${command.command}: ${result.error.message}`);
+    else if (result.status !== 0 && result.status !== null) failed.push(`${command.command} exited with ${result.status}`);
   }
-  say(green(`\n${plan.summary}`));
-  if (plan.removeCommand) {
-    say(dim(`Undo with: megaai-node uninstall`));
+
+  // Ask the operating system whether it worked, rather than assuming that
+  // reaching the end of the function means it did. An installer that prints
+  // "Registered ..." over the top of two errors is worse than one that fails.
+  let installed = failed.length === 0;
+  if (plan.verifyCommand) {
+    const check = spawnSync(plan.verifyCommand.command, plan.verifyCommand.args, { stdio: 'ignore' });
+    installed = check.status === 0;
   }
+
+  if (installed) {
+    say(green(`\n${plan.summary}`));
+    if (failed.length > 0) say(yellow(`(${failed.join('; ')} — but it is registered, so this looks harmless.)`));
+    say(dim('Undo with: megaai-node uninstall'));
+    return;
+  }
+
+  say(red('\nIt is NOT installed. Nothing will start on its own.'));
+  for (const failure of failed) say(red(`  · ${failure}`));
+  if (plan.platform === 'win32') {
+    say(
+      dim(
+        '\nIf schtasks says "Access is denied", run this from a PowerShell started with "Run as administrator".\n' +
+          `The task file it tried to register is ${plan.files[0]?.path} — it can also be imported by hand from\n` +
+          'Task Scheduler → Action → Import Task.',
+      ),
+    );
+  }
+  process.exitCode = 1;
 }
 
 function uninstall(config: NodeConfig): void {
@@ -312,6 +418,12 @@ async function main(): Promise<void> {
     case 'add':
       await add(config, args);
       break;
+    case 'tasks':
+      await tasks(config);
+      break;
+    case 'cancel':
+      await cancel(config, args);
+      break;
     case 'install':
       install(config, args);
       break;
@@ -320,7 +432,7 @@ async function main(): Promise<void> {
       break;
     default:
       say(`Unknown command "${command}".`);
-      say('Try: run · status · add · install · uninstall');
+      say('Try: run · status · tasks · add · cancel · install · uninstall');
       process.exitCode = 1;
   }
 }

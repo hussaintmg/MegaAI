@@ -450,6 +450,38 @@ export class Mesh {
   }
 
   /**
+   * Take a task off the queue for good.
+   *
+   * A queue you cannot remove things from is a queue you stop trusting: one
+   * mistyped task sits in every status listing forever, and eventually you
+   * stop reading the listing. Unlike everything else here, this does not need
+   * to hold the task — you are allowed to change your mind about work nobody
+   * has started, and about work a machine is part-way through.
+   */
+  async cancel(taskId: string, reason = 'cancelled'): Promise<MeshTask> {
+    const task = await this.store.getTask(taskId);
+    if (!task) throw new MegaError('NOT_FOUND', `No task ${taskId}`);
+    if (task.state === 'completed') {
+      throw new MegaError('INVALID_INPUT', `"${task.title}" is already finished — there is nothing to cancel`);
+    }
+    const next: MeshTask = {
+      ...task,
+      state: 'cancelled',
+      updatedAt: this.clock.now(),
+      rev: task.rev + 1,
+      error: reason,
+    };
+    delete next.claimedBy;
+    delete next.leaseUntil;
+    delete next.waitingFor;
+    delete next.notBefore;
+    await this.store.putTask(next);
+    // A node part-way through it finds out when its lease renewal is rejected.
+    this.emit('task.cancelled', `"${task.title}" was cancelled: ${reason}`, { taskId });
+    return next;
+  }
+
+  /**
    * Report a failure — and, while attempts remain, put it back rather than
    * ending it. Panicking at the first error is what loses a night's work.
    */

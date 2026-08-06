@@ -39,16 +39,36 @@ export interface AutostartOptions {
   stateDir?: string;
 }
 
+/**
+ * How a generated file has to be written.
+ *
+ * `utf16le-bom` is not a preference. `schtasks /Create /XML` decides how to
+ * read the file from its byte-order mark: without one it reads UTF-16 bytes as
+ * ANSI, sees `<` followed by a NUL, and rejects the whole thing with
+ * "The task XML is malformed. (1,2)::ERROR: one root element". Writing UTF-16
+ * *without* the mark fails in exactly the same way as writing UTF-8, which is
+ * why this travels with the plan instead of being left to the caller.
+ */
+export type FileEncoding = 'utf8' | 'utf16le-bom';
+
 export interface AutostartPlan {
   platform: NodeJS.Platform;
   /** Written first… */
-  files: Array<{ path: string; contents: string }>;
+  files: Array<{ path: string; contents: string; encoding: FileEncoding }>;
   /** …then these are run, in order. */
   commands: Array<{ command: string; args: string[] }>;
-  /** What to tell the person doing it. */
+  /** What to tell the person doing it — *after* it has been checked. */
   summary: string;
   /** How to undo it. */
   removeCommand?: { command: string; args: string[] };
+  /**
+   * Proves the thing was actually installed.
+   *
+   * Every command above can print an error and still leave the installer
+   * looking like it worked. Asking the operating system whether the task
+   * exists is the only answer worth reporting.
+   */
+  verifyCommand?: { command: string; args: string[] };
 }
 
 const DEFAULT_TASK_NAME = 'MegaAI Node Agent';
@@ -181,13 +201,14 @@ export function autostartPlan(options: AutostartOptions): AutostartPlan {
     const xmlPath = path.win32.join(stateDir, 'megaai-node-agent.xml');
     return {
       platform,
-      files: [{ path: xmlPath, contents: windowsTaskXml({ ...options, taskName }) }],
+      files: [{ path: xmlPath, contents: windowsTaskXml({ ...options, taskName }), encoding: 'utf16le-bom' }],
       commands: [
         // /F replaces an existing registration, so re-running the installer
         // after an upgrade updates the task instead of failing.
         { command: 'schtasks.exe', args: ['/Create', '/TN', taskName, '/XML', xmlPath, '/F'] },
         { command: 'schtasks.exe', args: ['/Run', '/TN', taskName] },
       ],
+      verifyCommand: { command: 'schtasks.exe', args: ['/Query', '/TN', taskName] },
       removeCommand: { command: 'schtasks.exe', args: ['/Delete', '/TN', taskName, '/F'] },
       summary: `Registered "${taskName}" to start 30 seconds after you log in, hidden, restarting itself if it crashes, and running on battery as well as mains.`,
     };
@@ -198,9 +219,10 @@ export function autostartPlan(options: AutostartOptions): AutostartPlan {
     const plistPath = path.join(home, 'Library', 'LaunchAgents', 'com.megaai.node-agent.plist');
     return {
       platform,
-      files: [{ path: plistPath, contents: launchdPlist(options) }],
+      files: [{ path: plistPath, contents: launchdPlist(options), encoding: 'utf8' }],
       commands: [{ command: 'launchctl', args: ['load', '-w', plistPath] }],
       removeCommand: { command: 'launchctl', args: ['unload', '-w', plistPath] },
+      verifyCommand: { command: 'launchctl', args: ['list', 'com.megaai.node-agent'] },
       summary: 'Installed a LaunchAgent that starts at login and restarts if it stops.',
     };
   }
@@ -209,7 +231,8 @@ export function autostartPlan(options: AutostartOptions): AutostartPlan {
   const unitPath = path.join(home, '.config', 'systemd', 'user', 'megaai-node-agent.service');
   return {
     platform,
-    files: [{ path: unitPath, contents: systemdUnit(options) }],
+    files: [{ path: unitPath, contents: systemdUnit(options), encoding: 'utf8' }],
+    verifyCommand: { command: 'systemctl', args: ['--user', 'is-enabled', 'megaai-node-agent.service'] },
     commands: [
       { command: 'systemctl', args: ['--user', 'daemon-reload'] },
       { command: 'systemctl', args: ['--user', 'enable', '--now', 'megaai-node-agent.service'] },

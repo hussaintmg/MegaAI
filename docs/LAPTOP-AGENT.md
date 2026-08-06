@@ -58,6 +58,21 @@ node apps\node\dist\index.js add "build the landing page" ^
 
 Then leave `run` going — or let the Scheduled Task do it.
 
+`tasks` lists everything in the queue with its id and, for anything still
+waiting, the reason it is waiting. `cancel <id or part of the title>` takes one
+off — including one a machine is part-way through.
+
+### If `install` fails
+
+It will say so and exit non-zero; it asks Windows whether the task exists
+rather than assuming that reaching the end means it worked.
+
+- **"Access is denied"** — run it from a PowerShell started with *Run as
+  administrator*.
+- Anything else — the task file it generated is still at
+  `%LOCALAPPDATA%\MegaAI\megaai-node-agent.xml`, and Task Scheduler →
+  *Action* → *Import Task* will take it directly.
+
 ---
 
 ## What it does with the machine
