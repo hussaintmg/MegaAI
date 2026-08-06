@@ -83,6 +83,9 @@
       "path": "packages/jobs"
     },
     {
+      "path": "packages/mesh"
+    },
+    {
       "path": "packages/context"
     },
     {
