@@ -58,6 +58,10 @@ node apps\node\dist\index.js add "build the landing page" ^
 
 Then leave `run` going — or let the Scheduled Task do it.
 
+For a whole new project rather than one task, there is a prompt to paste into
+Claude Code on the laptop that sets the folder up and queues the work in the
+right order: [NEW-PROJECT-PROMPT.md](./NEW-PROJECT-PROMPT.md).
+
 `tasks` lists everything in the queue with its id and, for anything still
 waiting, the reason it is waiting. `cancel <id or part of the title>` takes one
 off — including one a machine is part-way through.
