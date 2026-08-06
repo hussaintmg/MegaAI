@@ -44,6 +44,7 @@ import {
 } from '@megaai/node-agent';
 import { checkProjectDir, loadNodeConfig, type NodeConfig } from './config.js';
 import { envFilePath, loadEnvFile, maskValue, parseEnv, writeEnvFile } from './env.js';
+import { explainMongoFailure, type MongoTrouble } from './mongo-trouble.js';
 
 const useColor = process.stdout.isTTY && !process.env['NO_COLOR'];
 const paint = (code: string, text: string): string => (useColor ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -61,26 +62,67 @@ function say(line = ''): void {
  * Wiring
  * ------------------------------------------------------------------ */
 
-async function openStore(config: NodeConfig): Promise<{ store: MeshStore; close: () => Promise<void>; where: string }> {
-  if (!config.mongoUri) {
-    const store = new FileMeshStore(config.queueFile, { onError: (message) => say(yellow(message)) });
-    await store.open();
-    return { store, close: () => store.flush(), where: config.queueFile };
-  }
+interface OpenedStore {
+  store: MeshStore;
+  close: () => Promise<void>;
+  where: string;
+  /** Set when the shared queue was wanted but could not be reached. */
+  degraded?: MongoTrouble;
+}
 
-  // Only needed when a connection string is configured, so the driver stays
-  // optional for someone running this on one laptop.
-  const { MongoClient } = await import('mongodb');
-  const { MongoMeshStore, ensureMeshIndexes, meshCollections } = await import('@megaai/mesh/mongo');
-  const client = new MongoClient(config.mongoUri);
-  await client.connect();
-  const collections = meshCollections(client.db(config.dbName) as never);
-  await ensureMeshIndexes(collections);
-  return {
-    store: new MongoMeshStore(collections),
-    close: () => client.close(),
-    where: `${config.dbName} on the shared database`,
-  };
+async function openLocalStore(config: NodeConfig): Promise<OpenedStore> {
+  const store = new FileMeshStore(config.queueFile, { onError: (message) => say(yellow(message)) });
+  await store.open();
+  return { store, close: () => store.flush(), where: config.queueFile };
+}
+
+/**
+ * Open the queue — the shared one if it is reachable, this machine's own if
+ * it is not.
+ *
+ * The database being unreachable must never stop the agent. A laptop that
+ * refuses to work because a cluster in another country is having a bad evening
+ * is precisely the panic this whole system exists to avoid: the coding agents
+ * are here, the projects are here, and the night can happen without Atlas.
+ * What it must not do is pretend — so the fall back is announced, with what
+ * went wrong and what fixes it.
+ */
+async function openStore(config: NodeConfig): Promise<OpenedStore> {
+  if (!config.mongoUri) return openLocalStore(config);
+
+  try {
+    // Only imported when a connection string is configured, so the driver
+    // stays optional for someone running this on one laptop.
+    const { MongoClient } = await import('mongodb');
+    const { MongoMeshStore, ensureMeshIndexes, meshCollections } = await import('@megaai/mesh/mongo');
+    const client = new MongoClient(config.mongoUri, {
+      // The default is 30 seconds of silence before it admits anything is
+      // wrong, which reads as a hang rather than a problem.
+      serverSelectionTimeoutMS: 8_000,
+      connectTimeoutMS: 8_000,
+    });
+    await client.connect();
+    const collections = meshCollections(client.db(config.dbName) as never);
+    await ensureMeshIndexes(collections);
+    return {
+      store: new MongoMeshStore(collections),
+      close: () => client.close(),
+      where: `${config.dbName} on the shared database`,
+    };
+  } catch (error) {
+    const local = await openLocalStore(config);
+    return { ...local, degraded: explainMongoFailure(error, config.mongoUri) };
+  }
+}
+
+/** Say what went wrong with the shared queue, and what to do about it. */
+function reportTrouble(trouble: MongoTrouble, queueFile: string): void {
+  say(yellow(`The shared queue is not reachable: ${trouble.summary}`));
+  say(`Working from this machine's own queue instead (${queueFile}) — nothing stops.`);
+  say(trouble.transient ? dim('If this is the network, it will work again as soon as it comes back.') : '');
+  say(bold('To fix it:'));
+  for (const fix of trouble.fixes) say(`  · ${fix}`);
+  say();
 }
 
 function buildAgent(config: NodeConfig, mesh: Mesh, log: (line: string) => void) {
@@ -151,7 +193,8 @@ async function run(config: NodeConfig): Promise<void> {
   const stamp = () => dim(new Date().toISOString().slice(11, 19));
   const log = (line: string) => say(`${stamp()} ${line}`);
 
-  const { store, close, where } = await openStore(config);
+  const opened = await openStore(config);
+  const { store, close, where } = opened;
   const mesh = new Mesh({ store, onEvent: (event) => log(dim(event.message)) });
   const { agent, found, probe } = buildAgent(config, mesh, log);
 
@@ -170,7 +213,8 @@ async function run(config: NodeConfig): Promise<void> {
   const node = await agent.start();
   say(`${bold('MegaAI')} is running as ${bold(node.name)}`);
   say(`Queue: ${where}`);
-  if (!config.mongoUri) {
+  if (opened.degraded) reportTrouble(opened.degraded, config.queueFile);
+  else if (!config.mongoUri) {
     // Not a failure — a local queue is a perfectly good way to run one laptop.
     // It only needs saying because the dashboard reads the shared one, so
     // without this the website looks broken rather than pointed elsewhere.
@@ -205,7 +249,8 @@ async function run(config: NodeConfig): Promise<void> {
 }
 
 async function status(config: NodeConfig): Promise<void> {
-  const { store, close, where } = await openStore(config);
+  const opened = await openStore(config);
+  const { store, close, where } = opened;
   const mesh = new Mesh({ store });
   const probe = createProbe();
   const sample = createSampler({ probe });
@@ -225,7 +270,10 @@ async function status(config: NodeConfig): Promise<void> {
 
   say(bold(`${config.name} — ${config.kind}`));
   say(`  queue        ${where}`);
-  if (!config.mongoUri) {
+  if (opened.degraded) {
+    say(red(`               the shared queue is not reachable: ${opened.degraded.summary}`));
+    for (const fix of opened.degraded.fixes) say(dim(`               · ${fix}`));
+  } else if (!config.mongoUri) {
     say(dim('               on this machine only — the website reads the shared queue, not this file'));
     say(dim('               megaai-node set MEGAAI_MONGODB_URI "<the string the website uses>"'));
   }

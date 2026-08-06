@@ -123,6 +123,19 @@ from then on picks it up — from a terminal, from the Task Scheduler, after a
 reboot. A real environment variable still wins, so you can point one run
 somewhere else without editing anything.
 
+**If the shared queue cannot be reached**, the agent does not stop. It says
+what went wrong, what fixes it, and carries on from this machine's own queue —
+the coding agents are here, the projects are here, and the night can happen
+without a database in another country. The one thing it will not do is pretend
+the website can see it.
+
+The failure you are most likely to meet is `querySrv ECONNREFUSED`. That is
+DNS: many home routers and most office and campus networks will not answer the
+SRV lookup that a `mongodb+srv://` string needs. In Atlas, go to
+**Connect → Drivers** and set the driver version to *Node.js 2.2.12 or later* —
+you get a plain `mongodb://` string listing the servers directly, which needs
+no SRV lookup at all. Changing the machine's DNS to `8.8.8.8` also works.
+
 Everything is turned down with environment variables — or `set`, which is the
 same names written down:
 
