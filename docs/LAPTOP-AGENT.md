@@ -105,7 +105,26 @@ after the same period below 12% CPU, it counts as you being away. Without this
 the agent would never reach `full` on any machine whose idle-time reading does
 not work, so work needing the screen would be deferred for ever, silently.
 
-Everything is turned down with environment variables rather than code:
+### Settings that survive closing the window
+
+`$env:MEGAAI_MONGODB_URI = "…"` in PowerShell lasts exactly as long as that
+PowerShell does, and the Scheduled Task starts with no shell at all — so the
+obvious place to put a setting is the one place the agent cannot read it from.
+Save it instead:
+
+```powershell
+node apps\node\dist\index.js set MEGAAI_MONGODB_URI "mongodb+srv://…"
+node apps\node\dist\index.js set                     # list what is saved
+node apps\node\dist\index.js set MEGAAI_MONGODB_URI ""   # remove it
+```
+
+It goes in `%LOCALAPPDATA%\MegaAI\.env`, readable only by you, and every run
+from then on picks it up — from a terminal, from the Task Scheduler, after a
+reboot. A real environment variable still wins, so you can point one run
+somewhere else without editing anything.
+
+Everything is turned down with environment variables — or `set`, which is the
+same names written down:
 
 | Variable | Default | |
 | --- | --- | --- |

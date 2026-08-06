@@ -157,12 +157,10 @@ export function loadNodeConfig(
   const lowBattery = readNumber(env, 'MEGAAI_LOW_BATTERY_PCT', notices, { min: 0, max: 90 });
   if (lowBattery !== undefined) thresholds.lowBatteryPct = lowBattery;
 
+  // Not a notice: a local queue is a perfectly good way to run one laptop, and
+  // listing it among the warnings made a deliberate choice look like a fault.
+  // `run` and `status` say where the queue is and how to move it instead.
   const mongoUri = env['MEGAAI_MONGODB_URI'] ?? env['MONGODB_URI'];
-  if (!mongoUri) {
-    notices.push(
-      'no MEGAAI_MONGODB_URI is set, so the queue lives in a file on this machine only — set one to share it with the phone and the cloud',
-    );
-  }
 
   return {
     name: env['MEGAAI_NODE_NAME'] ?? hostname,

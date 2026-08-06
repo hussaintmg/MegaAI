@@ -9,7 +9,9 @@ test('with nothing configured it still knows what to do', () => {
   assert.deepEqual(config.capabilities, ['shell', 'browser', 'gpu', 'whatsapp']);
   assert.equal(config.queueFile, '/home/me/.megaai/queue.json');
   assert.equal(config.mongoUri, undefined);
-  assert.match(config.notices.join(' '), /queue lives in a file on this machine only/);
+  // Running one laptop off a local queue is a choice, not a fault. Listing it
+  // among the warnings made it read as something broken.
+  assert.deepEqual(config.notices, []);
 });
 
 test('a connection string turns the local file into the shared queue', () => {
@@ -19,7 +21,7 @@ test('a connection string turns the local file into the shared queue', () => {
     'workstation',
   );
   assert.equal(config.mongoUri, 'mongodb+srv://cluster/megaai');
-  assert.equal(config.notices.length, 0, 'and there is nothing to warn about');
+  assert.equal(config.notices.length, 0);
 });
 
 test('Windows keeps its state where Windows programs keep state', () => {

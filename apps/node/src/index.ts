@@ -7,6 +7,7 @@
  *   megaai-node tasks                  everything in the queue, with ids
  *   megaai-node add "<task>" --project <dir> [--goal "<goal>"] [--interactive] [--urgent]
  *   megaai-node cancel <id|title>      take one off the queue
+ *   megaai-node set KEY VALUE          remember a setting across restarts
  *   megaai-node install [--dry-run]    make it start by itself at logon
  *   megaai-node uninstall              undo that
  *
@@ -16,7 +17,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -34,6 +35,7 @@ import {
   createProbe,
   createProcessLauncher,
   createSampler,
+  defaultStateDir,
   detectCoders,
   listProjectFiles,
   openInEditor,
@@ -41,6 +43,7 @@ import {
   type CoderTaskPayload,
 } from '@megaai/node-agent';
 import { checkProjectDir, loadNodeConfig, type NodeConfig } from './config.js';
+import { envFilePath, loadEnvFile, maskValue, parseEnv, writeEnvFile } from './env.js';
 
 const useColor = process.stdout.isTTY && !process.env['NO_COLOR'];
 const paint = (code: string, text: string): string => (useColor ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -158,12 +161,26 @@ async function run(config: NodeConfig): Promise<void> {
   // announce "this machine cannot report idle time" on a machine that reports
   // it perfectly well ten seconds later. It corrects itself, but the first
   // thing you read should not be wrong.
-  if (!(await waitForProbe(probe, 10_000))) {
-    log(yellow('the machine probe has not reported — falling back to judging activity by CPU load'));
+  if (!(await waitForProbe(probe, 20_000))) {
+    // Not final: the probe keeps trying, and the very next reading uses it if
+    // it arrives. Saying "falling back" without that reads as a verdict.
+    log(dim('the machine probe has not reported yet — judging activity by CPU load until it does'));
   }
 
   const node = await agent.start();
-  say(`${bold('MegaAI')} is running as ${bold(node.name)} — queue: ${where}`);
+  say(`${bold('MegaAI')} is running as ${bold(node.name)}`);
+  say(`Queue: ${where}`);
+  if (!config.mongoUri) {
+    // Not a failure — a local queue is a perfectly good way to run one laptop.
+    // It only needs saying because the dashboard reads the shared one, so
+    // without this the website looks broken rather than pointed elsewhere.
+    say(
+      dim(
+        'This queue is on this machine only, so the website cannot see it. To share it, run once:\n' +
+          '  megaai-node set MEGAAI_MONGODB_URI "<the same connection string the website uses>"',
+      ),
+    );
+  }
   say(
     found.installed.length > 0
       ? `Coding agents on this machine: ${green(found.installed.join(', '))}`
@@ -208,6 +225,10 @@ async function status(config: NodeConfig): Promise<void> {
 
   say(bold(`${config.name} — ${config.kind}`));
   say(`  queue        ${where}`);
+  if (!config.mongoUri) {
+    say(dim('               on this machine only — the website reads the shared queue, not this file'));
+    say(dim('               megaai-node set MEGAAI_MONGODB_URI "<the string the website uses>"'));
+  }
   say(`  can do       ${config.capabilities.join(', ')}`);
   say(
     `  right now    ${decision.gear === 'full' ? green(decision.gear) : decision.gear === 'stop' ? red(decision.gear) : yellow(decision.gear)} — ${decision.reason}`,
@@ -345,6 +366,68 @@ async function cancel(config: NodeConfig, args: string[]): Promise<void> {
   await close();
 }
 
+/**
+ * Remember a setting for every future run.
+ *
+ * This exists because `$env:MEGAAI_MONGODB_URI = "..."` lasts exactly as long
+ * as the PowerShell you typed it in, and the Scheduled Task starts with no
+ * shell at all — so the one place people naturally put it is the one place it
+ * cannot be read from.
+ */
+function setSetting(config: NodeConfig, args: string[]): void {
+  const file = envFilePath(config.stateDir);
+  const [key, ...rest] = args;
+  const value = rest.join(' ').trim();
+
+  if (!key) {
+    const saved = parseEnv(existsSync(file) ? readFileSync(file, 'utf8') : '');
+    say(bold('Saved settings'));
+    say(dim(file));
+    if (saved.length === 0) {
+      say(dim('  nothing saved yet'));
+    } else {
+      for (const entry of saved) say(`  ${entry.key} = ${maskValue(entry.key, entry.value)}`);
+    }
+    say();
+    say(dim('Set one with:  megaai-node set MEGAAI_MONGODB_URI "mongodb+srv://…"'));
+    say(dim('Remove one with an empty value:  megaai-node set MEGAAI_MONGODB_URI ""'));
+    return;
+  }
+
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    say(red(`"${key}" is not a settings name. They look like MEGAAI_MONGODB_URI.`));
+    process.exitCode = 1;
+    return;
+  }
+
+  // Checked here rather than at the next `run`, because a connection string
+  // pasted with the placeholder still in it is the single most common way this
+  // goes wrong, and finding out hours later is the expensive part.
+  if (key === 'MEGAAI_MONGODB_URI' && value) {
+    if (!/^mongodb(\+srv)?:\/\//.test(value)) {
+      say(red('That does not look like a MongoDB connection string — it should start with mongodb:// or mongodb+srv://'));
+      process.exitCode = 1;
+      return;
+    }
+    if (/<password>|<db_password>|<username>/i.test(value)) {
+      say(red('That connection string still has a <password> placeholder in it. Replace it with the real password first.'));
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  writeEnvFile(file, key, value);
+  if (value) {
+    say(`${green('Saved')} ${key} = ${maskValue(key, value)}`);
+    say(dim(`in ${file} — every run from now on uses it, including the Scheduled Task.`));
+    if (key === 'MEGAAI_MONGODB_URI') {
+      say(dim('Check it worked with: megaai-node status — the queue line should name the database, not a file.'));
+    }
+  } else {
+    say(`${green('Removed')} ${key}`);
+  }
+}
+
 function install(config: NodeConfig, args: string[]): void {
   const domain = process.env['USERDOMAIN'];
   const user = process.env['USERNAME'];
@@ -437,7 +520,17 @@ function valueOf(args: string[], flag: string): string | undefined {
 
 async function main(): Promise<void> {
   const [command = 'run', ...args] = process.argv.slice(2);
+
+  // Read the saved settings *before* the config, so a connection string
+  // written once with `set` is in force for every future run — including the
+  // Scheduled Task, which starts with no shell and therefore no `$env:`.
+  const stateDir = process.env['MEGAAI_STATE_DIR'] ?? defaultStateDir(process.env, process.platform);
+  const fromFile = loadEnvFile(envFilePath(stateDir, process.platform));
+
   const config = loadNodeConfig(process.env, process.platform, os.hostname());
+  if (fromFile.length > 0 && command !== 'set') {
+    say(dim(`Using saved settings: ${fromFile.join(', ')}`));
+  }
 
   switch (command) {
     case 'run':
@@ -455,6 +548,9 @@ async function main(): Promise<void> {
     case 'cancel':
       await cancel(config, args);
       break;
+    case 'set':
+      setSetting(config, args);
+      break;
     case 'install':
       install(config, args);
       break;
@@ -463,7 +559,7 @@ async function main(): Promise<void> {
       break;
     default:
       say(`Unknown command "${command}".`);
-      say('Try: run · status · tasks · add · cancel · install · uninstall');
+      say('Try: run · status · tasks · add · cancel · set · install · uninstall');
       process.exitCode = 1;
   }
 }
