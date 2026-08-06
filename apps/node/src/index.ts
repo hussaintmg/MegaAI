@@ -133,7 +133,10 @@ function buildAgent(config: NodeConfig, mesh: Mesh, log: (line: string) => void)
   const found = detectCoders(BUILTIN_CODERS);
   pool.setInstalled(found.installed);
 
-  const launcher = createProcessLauncher({ onKill: (pid, why) => log(`stopped process ${pid}: ${why}`) });
+  const launcher = createProcessLauncher({
+    onKill: (pid, why) => log(`stopped process ${pid}: ${why}`),
+    onNote: (message) => log(yellow(message)),
+  });
   const state = new StateFile(config.stateFile);
 
   const agent = new NodeAgent({
@@ -173,6 +176,24 @@ async function waitForProbe(probe: { latest: () => Record<string, unknown> }, ti
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return Object.keys(probe.latest()).length > 0;
+}
+
+/** Break a long error across lines so a terminal does not swallow the end. */
+function wrap(text: string, width: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\r?\n/)) {
+    let current = '';
+    for (const word of paragraph.split(/\s+/)) {
+      if (current && current.length + word.length + 1 > width) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = current ? `${current} ${word}` : word;
+      }
+    }
+    if (current) lines.push(current);
+  }
+  return lines;
 }
 
 /** Where MegaAI itself lives — `apps/node/dist/index.js` is three deep. */
@@ -377,8 +398,33 @@ async function tasks(config: NodeConfig): Promise<void> {
     const mark =
       task.state === 'completed' ? green('✓') : task.state === 'failed' ? red('✗') : task.state === 'cancelled' ? dim('–') : yellow('·');
     say(`${mark} ${dim(task.id)}  ${task.title}  ${dim(`(${task.state})`)}`);
-    const why = task.state === 'pending' ? await mesh.explainWait(task.id) : undefined;
-    if (why) say(dim(`           ${why}`));
+
+    if (task.state === 'pending') {
+      const why = await mesh.explainWait(task.id);
+      if (why) say(dim(`           ${why}`));
+    }
+
+    // A failed task's error is the single most useful line on this screen —
+    // it is the whole reason you came to look — and it was not being shown at
+    // all, so eight failures looked identical to eight mysteries.
+    if (task.state === 'failed' && task.error) {
+      for (const line of wrap(task.error, 92)) say(red(`           ${line}`));
+      say(dim(`           gave up after ${task.attempts} of ${task.maxAttempts} attempts`));
+    }
+    if (task.state === 'completed' && task.result) {
+      const by = task.result['finishedBy'];
+      const handoffs = Number(task.result['handoffs'] ?? 0);
+      if (typeof by === 'string') {
+        say(dim(`           finished by ${by}${handoffs > 0 ? ` after ${handoffs} handoff(s)` : ''}`));
+      }
+    }
+  }
+
+  const failed = all.filter((task) => task.state === 'failed');
+  if (failed.length > 0) {
+    say();
+    say(yellow(`${failed.length} task(s) failed. Their errors are above — that is what to fix.`));
+    say(dim('Run one again by queueing it afresh; a failed task is not retried on its own.'));
   }
   say();
   say(dim('Remove one with: megaai-node cancel <id or part of the title>'));

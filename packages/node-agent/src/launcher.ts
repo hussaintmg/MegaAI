@@ -1,7 +1,7 @@
 /**
  * Starting the coding CLIs on a real machine — which mostly means Windows.
  *
- * Two things break naive `spawn('claude', …)` on Windows and both are handled
+ * Three things break naive `spawn('claude', …)` on Windows and all are handled
  * here:
  *
  *   1. `claude`, `codex` and `opencode` are installed by npm as **shims**:
@@ -18,7 +18,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CoderId, CoderLauncher, CoderSpec, RunOutcome } from '@megaai/coders';
 
@@ -86,6 +86,31 @@ export function detectCoders(
   return { installed, paths };
 }
 
+/**
+ * The JavaScript an npm `.cmd` shim actually runs.
+ *
+ * npm generates a batch file whose last line is roughly
+ *
+ *     … & "%_prog%"  "%dp0%\\node_modules\\@scope\\pkg\\cli.js" %*
+ *
+ * so the entry point is sitting right there. Pulling it out lets us run the
+ * program with the node we already have rather than asking Windows to run a
+ * batch file it now refuses to run.
+ *
+ * Returns nothing if the shim does not look like npm's — better to fall back
+ * than to spawn something guessed.
+ */
+export function resolveShimTarget(contents: string, shimDir: string): string | undefined {
+  // Take the last .js mentioned: earlier lines reference node.exe and the
+  // shim's own directory, and the entry point is on the exec line at the end.
+  const matches = [...contents.matchAll(/"([^"]*?\.[cm]?js)"/g)].map((match) => match[1] ?? '');
+  const target = matches[matches.length - 1];
+  if (!target) return undefined;
+  // %dp0% is the shim's own folder, with a trailing separator of its own.
+  const expanded = target.replace(/%~?dp0%[\\/]*/gi, `${shimDir}\\`).replace(/\\{2,}/g, '\\');
+  return expanded;
+}
+
 /* ------------------------------------------------------------------ *
  * Running one
  * ------------------------------------------------------------------ */
@@ -103,6 +128,43 @@ export interface ProcessLauncherOptions {
   /** Extra environment for the child (tokens, `CI=1`, …). */
   env?: NodeJS.ProcessEnv;
   onKill?: (pid: number, why: string) => void;
+  /** Injected for tests; defaults to reading the shim off disk. */
+  readShim?: (file: string) => string | undefined;
+  /** The node to run a resolved shim target with. */
+  nodePath?: string;
+  onNote?: (message: string) => void;
+}
+
+/**
+ * What to actually spawn, given what PATH resolved to.
+ *
+ * On Windows a `.cmd` cannot be spawned at all any more, so it is unwrapped
+ * into the node + script it was always going to run. Everywhere else — and for
+ * a real `.exe` — the file is spawned as found.
+ */
+export function planSpawn(
+  file: string,
+  args: string[],
+  options: { platform: NodeJS.Platform; readShim?: (file: string) => string | undefined; nodePath?: string; dirname?: (p: string) => string },
+): { file: string; args: string[]; note?: string } {
+  if (options.platform !== 'win32' || !/\.(cmd|bat)$/i.test(file)) return { file, args };
+
+  const dirname = options.dirname ?? path.win32.dirname;
+  const contents = options.readShim?.(file);
+  const target = contents ? resolveShimTarget(contents, dirname(file)) : undefined;
+  if (!target) {
+    // Nothing safe left to try. Spawning the .cmd will fail with EINVAL, and
+    // saying why beats letting the driver's error stand on its own.
+    return {
+      file,
+      args,
+      note:
+        `${file} is a batch shim that could not be unwrapped. Node refuses to run .cmd files directly ` +
+        '(the fix for CVE-2024-27980), so this will fail with EINVAL. Installing the agent so that a real ' +
+        '.exe is on PATH avoids it.',
+    };
+  }
+  return { file: options.nodePath ?? process.execPath, args: [target, ...args] };
 }
 
 /**
@@ -120,10 +182,27 @@ export function createProcessLauncher(options: ProcessLauncherOptions = {}): Cod
   const silenceTimeoutMs = options.silenceTimeoutMs ?? 20 * 60_000;
   const timeoutMs = options.timeoutMs ?? 90 * 60_000;
 
+  const readShim =
+    options.readShim ??
+    ((file: string) => {
+      try {
+        return readFileSync(file, 'utf8');
+      } catch {
+        return undefined;
+      }
+    });
+
   return async (command, args, cwd, onChunk) =>
     new Promise<RunOutcome>((resolveOutcome) => {
-      const file = resolve(command) ?? command;
-      const child = spawnProcess(file, args, {
+      const resolved = resolve(command) ?? command;
+      const plan = planSpawn(resolved, args, {
+        platform,
+        readShim,
+        ...(options.nodePath ? { nodePath: options.nodePath } : {}),
+      });
+      if (plan.note) options.onNote?.(plan.note);
+      const file = plan.file;
+      const child = spawnProcess(file, plan.args, {
         cwd,
         // detached gives us a process group to kill on POSIX; on Windows the
         // group comes from taskkill /T instead, and detaching only hurts.

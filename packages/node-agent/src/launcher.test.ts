@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { BUILTIN_CODERS } from '@megaai/coders';
-import { createProcessLauncher, detectCoders, resolveCommand } from './launcher.js';
+import { createProcessLauncher, detectCoders, planSpawn, resolveCommand, resolveShimTarget } from './launcher.js';
 
 const WINDOWS = {
   platform: 'win32' as NodeJS.Platform,
@@ -146,4 +146,71 @@ test('a very long build is kept to its tail rather than held whole in memory', a
   const outcome = await running;
   assert.ok(outcome.output.length <= 100);
   assert.match(outcome.output, /usage limit reached/, 'and the tail is the part that matters');
+});
+
+/* ---------------- the .cmd Node will no longer run ---------------- */
+
+/** What npm actually writes for a scoped package's binary. */
+const NPM_SHIM = [
+  '@ECHO off',
+  'GOTO start',
+  ':find_dp0',
+  'SET dp0=%~dp0',
+  'EXIT /b',
+  ':start',
+  'SETLOCAL',
+  'CALL :find_dp0',
+  '',
+  'IF EXIST "%dp0%\\node.exe" (',
+  '  SET "_prog=%dp0%\\node.exe"',
+  ') ELSE (',
+  '  SET "_prog=node"',
+  '  SET PATHEXT=%PATHEXT:;.JS;=;%',
+  ')',
+  '',
+  'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*',
+].join('\r\n');
+
+test('the shim gives up the script it was always going to run', () => {
+  const target = resolveShimTarget(NPM_SHIM, 'C:\\Users\\me\\AppData\\Roaming\\npm');
+  assert.equal(target, 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js');
+});
+
+test('a .cmd is unwrapped into node + script rather than spawned', () => {
+  // Since the fix for CVE-2024-27980, Node refuses to spawn a .cmd without a
+  // shell — and a shell cannot carry a multi-line handoff brief. Running the
+  // script directly sidesteps both.
+  const plan = planSpawn('C:\\npm\\claude.cmd', ['-p', 'a brief\nwith newlines & "quotes"'], {
+    platform: 'win32',
+    readShim: () => NPM_SHIM,
+    nodePath: 'C:\\node.exe',
+    dirname: () => 'C:\\npm',
+  });
+
+  assert.equal(plan.file, 'C:\\node.exe');
+  assert.equal(plan.args[0], 'C:\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js');
+  assert.equal(plan.args[2], 'a brief\nwith newlines & "quotes"', 'the brief survives untouched');
+  assert.equal(plan.note, undefined);
+});
+
+test('a real .exe is spawned as found — only batch files need unwrapping', () => {
+  const plan = planSpawn('C:\\tools\\codex.exe', ['exec'], { platform: 'win32', readShim: () => NPM_SHIM });
+  assert.equal(plan.file, 'C:\\tools\\codex.exe');
+  assert.deepEqual(plan.args, ['exec']);
+});
+
+test('nothing is unwrapped anywhere but Windows', () => {
+  const plan = planSpawn('/usr/local/bin/claude', ['-p', 'x'], { platform: 'linux', readShim: () => NPM_SHIM });
+  assert.equal(plan.file, '/usr/local/bin/claude');
+});
+
+test('a shim that cannot be read says what will happen instead of failing blankly', () => {
+  const plan = planSpawn('C:\\npm\\claude.cmd', [], { platform: 'win32', readShim: () => undefined });
+  assert.equal(plan.file, 'C:\\npm\\claude.cmd', 'it still tries');
+  assert.match(plan.note ?? '', /EINVAL/);
+  assert.match(plan.note ?? '', /CVE-2024-27980/, 'so the cause is findable rather than mysterious');
+});
+
+test('a shim in an unfamiliar format is left alone rather than guessed at', () => {
+  assert.equal(resolveShimTarget('@echo off\r\nsomething-else.exe %*', 'C:\\npm'), undefined);
 });
