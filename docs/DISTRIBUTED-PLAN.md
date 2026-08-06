@@ -105,6 +105,14 @@ This is a hard requirement, not a nice-to-have. The laptop agent:
 - Reads its own thresholds from config, so if it still gets warm you turn it
   down without touching code.
 
+Built, and one thing had to change once it ran. "Are you at the keyboard" comes
+from `GetLastInputInfo`, which some machines cannot answer at all. The first
+version treated *unknown* as *you are here* — safe, and completely useless:
+on any such machine the whole backlog deferred forever, silently, which is the
+exact failure this system exists to end. So where there is no idle-time
+reading, CPU load stands in: sustained quiet below 12% for the same period
+counts as away, and the reason on screen says which signal it acted on.
+
 ### 2.5 The agent fleet
 
 Today: one coding agent, one testing agent, one reviewer. That is why the
@@ -177,9 +185,10 @@ one being finished.
 
 | # | Phase | You can | Size |
 | --- | --- | --- | --- |
-| **1** | **Mesh core** — node registry, heartbeats, durable task queue with leases, capability routing, live change-stream + SSE | See every node's status live; queue a task with the laptop off and watch it run when the laptop wakes | ~1 week |
-| **2** | **Laptop agent** — autostart, resource guard, three gears, crash-resume, local Chrome control | Close the lid mid-task and have it continue after reboot; watch it back off while you work | ~1 week |
-| **3** | **Coder relay** — drive Claude Code / Codex / OpenCode, track quota, hand off with context, resume at reset | Leave it overnight and find work done by three agents in turn, not one that stopped at midnight | ~1 week |
+| **1** ✅ | **Mesh core** — node registry, heartbeats, durable task queue with leases, capability routing, MongoDB store with change streams (polling fallback), local file store | See every node's status live; queue a task with the laptop off and watch it run when the laptop wakes | done |
+| **2** ✅ | **Laptop agent** — autostart, resource guard, three gears, crash-resume, per-project locking | Close the lid mid-task and have it continue after reboot; watch it back off while you work — see [LAPTOP-AGENT.md](./LAPTOP-AGENT.md) | done |
+| **3** ✅ | **Coder relay** — drive Claude Code / Codex / OpenCode, track quota, hand off with context, resume at reset | Leave it overnight and find work done by three agents in turn, not one that stopped at midnight | done |
+| **3a** | **The rest of phase 1–3** — SSE to the browser, the dashboard's live node/queue view, local Chrome control for WhatsApp | Watch it work from the phone | ~1 week |
 | **3b** | **Multi-turn agents + fleet** — the propose→verify→correct loop, and the specialist agents above | Get code that compiles because the agent saw the error | ~2 weeks |
 | **4** | **Phone node** — PWA for control and live logs; Termux agent for phone-only work (SMS, WhatsApp, camera) | Say "email this to the client" from your phone and have it happen | ~1 week |
 | **5** | **Full delivery** — repo creation, push, Vercel deploy, then open the live URL and verify it really works | One sentence in, a live verified URL out | ~1 week |
@@ -192,7 +201,7 @@ one being finished.
 
 | Node | Setup |
 | --- | --- |
-| Laptop | `npx megaai node install` — installs the autostart service, pastes your platform URL and token |
+| Laptop | `node apps/node/dist/index.js install` — registers the autostart task. Full instructions: [LAPTOP-AGENT.md](./LAPTOP-AGENT.md) |
 | Phone (control) | Open the dashboard in Chrome → "Add to home screen" |
 | Phone (worker) | Termux from **F-Droid** (the Play Store build is abandoned), then `npx megaai node install` |
 | Vercel | Already done |

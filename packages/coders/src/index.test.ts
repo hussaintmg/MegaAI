@@ -217,6 +217,30 @@ test('the task moves down the line until an agent finishes it', async () => {
   assert.equal(events.filter((e) => e.startsWith('coder.limited')).length, 2);
 });
 
+test('every turn is reported as it happens, so it can be written down before the next one', async () => {
+  // If the history were only handed back at the end, a reboot at 3am would
+  // lose everything the first two agents did.
+  const { p } = pool();
+  const { launcher } = scripted([
+    { exitCode: 1, output: 'usage limit reached, resets at 2026-08-06T14:00:00Z' },
+    { exitCode: 0, output: 'Finished it.' },
+  ]);
+  const seen: Array<{ coder: string; historyLength: number }> = [];
+
+  await relayTask({
+    pool: p,
+    launcher,
+    context: { ...CONTEXT, history: [] },
+    onTurn: (turn, history) => {
+      seen.push({ coder: turn.coder, historyLength: history.length });
+    },
+  });
+
+  assert.deepEqual(seen.map((entry) => entry.coder), ['claude', 'codex']);
+  assert.ok(seen[0]!.historyLength >= 1, 'the first agent’s work is recorded before the second starts');
+  assert.ok(seen[1]!.historyLength > seen[0]!.historyLength);
+});
+
 test('when the line runs out the task is parked, with the time it resumes', async () => {
   const { p, clock } = pool();
   const { launcher } = scripted([

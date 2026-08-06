@@ -148,6 +148,29 @@ test('a failure is retried with backoff, and only gives up when the attempts run
   assert.match(exhausted.error ?? '', /network dropped again/);
 });
 
+test('parking is not failing — the attempt is handed back and the reason is kept', async () => {
+  const { clock, m } = mesh();
+  await laptop(m);
+  const task = await m.enqueue({ title: 'write the feature', requires: ['shell'], maxAttempts: 2 });
+
+  const claimed = await m.claimNext('laptop');
+  assert.equal(claimed?.attempts, 1);
+
+  const parked = await m.park(
+    task.id,
+    'laptop',
+    clock.now() + 4 * 3_600_000,
+    'every coding agent is out of quota — work resumes when the first one comes back',
+  );
+  assert.equal(parked.state, 'pending');
+  assert.equal(parked.attempts, 0, 'running out of quota must not push the task closer to being abandoned');
+  assert.match(await m.explainWait(task.id) ?? '', /out of quota/);
+
+  assert.equal(await m.claimNext('laptop'), undefined, 'and it is not offered again before then');
+  clock.advance(4 * 3_600_000 + 1);
+  assert.equal((await m.claimNext('laptop'))?.id, task.id, 'it comes back on its own');
+});
+
 test('only the holder may report on a task', async () => {
   const { m } = mesh();
   await laptop(m);

@@ -89,6 +89,9 @@
       "path": "packages/coders"
     },
     {
+      "path": "packages/node-agent"
+    },
+    {
       "path": "packages/context"
     },
     {
@@ -108,6 +111,9 @@
     },
     {
       "path": "apps/server"
+    },
+    {
+      "path": "apps/node"
     }
   ]
 }

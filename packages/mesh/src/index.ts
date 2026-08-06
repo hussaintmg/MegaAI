@@ -124,13 +124,28 @@ export interface EnqueueOptions {
  * Storage seam
  * ------------------------------------------------------------------ */
 
+/**
+ * Which tasks to fetch.
+ *
+ * The queue only ever needs the live ones to make a decision, and a database
+ * that has been running for a month should not be read whole to answer "is
+ * there anything for me to do".
+ */
+export interface TaskFilter {
+  states?: MeshTaskState[];
+  limit?: number;
+}
+
+/** The states that still need something to happen to them. */
+export const LIVE_STATES: MeshTaskState[] = ['pending', 'claimed', 'running'];
+
 export interface MeshStore {
   putNode(node: NodeRecord): Promise<void>;
   getNode(id: string): Promise<NodeRecord | undefined>;
   listNodes(): Promise<NodeRecord[]>;
   putTask(task: MeshTask): Promise<void>;
   getTask(id: string): Promise<MeshTask | undefined>;
-  listTasks(): Promise<MeshTask[]>;
+  listTasks(filter?: TaskFilter): Promise<MeshTask[]>;
   /**
    * Take the task only if nobody has touched it since we read it.
    * Two nodes reaching for the same task is the normal case, not the rare one;
@@ -161,8 +176,12 @@ export class MemoryMeshStore implements MeshStore {
     const task = this.tasks.get(id);
     return task ? { ...task } : undefined;
   }
-  async listTasks(): Promise<MeshTask[]> {
-    return [...this.tasks.values()].map((task) => ({ ...task }));
+  async listTasks(filter: TaskFilter = {}): Promise<MeshTask[]> {
+    let tasks = [...this.tasks.values()];
+    if (filter.states) tasks = tasks.filter((task) => filter.states?.includes(task.state));
+    tasks.sort((a, b) => a.createdAt - b.createdAt);
+    if (filter.limit !== undefined) tasks = tasks.slice(0, filter.limit);
+    return tasks.map((task) => ({ ...task }));
   }
   async claim(taskId: string, expectRev: number, next: MeshTask): Promise<boolean> {
     const current = this.tasks.get(taskId);
@@ -322,8 +341,7 @@ export class Mesh {
   async reclaimExpired(): Promise<MeshTask[]> {
     const now = this.clock.now();
     const reclaimed: MeshTask[] = [];
-    for (const task of await this.store.listTasks()) {
-      if (task.state !== 'claimed' && task.state !== 'running') continue;
+    for (const task of await this.store.listTasks({ states: ['claimed', 'running'] })) {
       if ((task.leaseUntil ?? 0) > now) continue;
       const next: MeshTask = {
         ...task,
@@ -361,7 +379,7 @@ export class Mesh {
 
     const now = this.clock.now();
     const others = (await this.onlineNodes()).filter((other) => other.id !== nodeId);
-    const tasks = await this.store.listTasks();
+    const tasks = await this.store.listTasks({ states: LIVE_STATES });
 
     const running = tasks.filter((task) => task.claimedBy === nodeId && (task.state === 'claimed' || task.state === 'running'));
     if (running.length >= node.concurrency) return undefined;
@@ -460,6 +478,33 @@ export class Mesh {
     return next;
   }
 
+  /**
+   * Put a task down without spending an attempt on it.
+   *
+   * This is not failure and must not be recorded as one: every coding agent
+   * being out of quota, the machine getting too hot, another task holding the
+   * same project — none of them are the task going wrong, and none of them
+   * should push it closer to being abandoned. The attempt taken at claim time
+   * is handed back, and `until` is when it may be offered again.
+   */
+  async park(taskId: string, nodeId: string, until: Timestamp, reason: string): Promise<MeshTask> {
+    const task = await this.requireHeld(taskId, nodeId);
+    const next: MeshTask = {
+      ...task,
+      state: 'pending',
+      attempts: Math.max(0, task.attempts - 1),
+      notBefore: Math.max(until, this.clock.now()),
+      updatedAt: this.clock.now(),
+      rev: task.rev + 1,
+      waitingFor: reason,
+    };
+    delete next.claimedBy;
+    delete next.leaseUntil;
+    await this.store.putTask(next);
+    this.emit('task.parked', `"${task.title}" is waiting: ${reason}`, { nodeId, taskId });
+    return next;
+  }
+
   private async requireHeld(taskId: string, nodeId: string): Promise<MeshTask> {
     const task = await this.store.getTask(taskId);
     if (!task) throw new MegaError('NOT_FOUND', `Unknown task "${taskId}"`);
@@ -482,7 +527,12 @@ export class Mesh {
     if (!task || task.state !== 'pending') return undefined;
     const now = this.clock.now();
     if ((task.notBefore ?? 0) > now) {
-      return `retrying in ${Math.ceil(((task.notBefore ?? now) - now) / 1000)}s after: ${task.error ?? 'a failure'}`;
+      const seconds = Math.ceil(((task.notBefore ?? now) - now) / 1000);
+      // A parked task already carries its own explanation; only a *failed* one
+      // needs the retry wording, because the two mean different things.
+      return task.waitingFor && !task.waitingFor.startsWith('retrying')
+        ? `${task.waitingFor} (in ${seconds}s)`
+        : `retrying in ${seconds}s after: ${task.error ?? 'a failure'}`;
     }
     const nodes = await this.store.listNodes();
     const capable = nodes.filter((node) => this.capable(node, task));

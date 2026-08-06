@@ -162,6 +162,15 @@ export interface HandoffContext {
   history: Array<{ coder: CoderId; summary: string; at: Timestamp }>;
   /** `git status --short`, or an equivalent view of what changed. */
   changedFiles?: string[];
+  /**
+   * What is already in the folder.
+   *
+   * Not the same thing as `changedFiles`, and needed for the common case where
+   * the project is not a git repository: without it the brief tells the next
+   * agent to "read the files listed above" and lists nothing, which is how an
+   * agent ends up rewriting a page that already existed.
+   */
+  projectFiles?: string[];
   /** The last thing the previous agent said before it ran out. */
   lastOutputTail?: string;
   /** Anything the run has learned that must survive a handoff. */
@@ -202,6 +211,14 @@ export function buildHandoffBrief(context: HandoffContext, nextCoder: CoderSpec)
       '## Files already changed in this project',
       ...context.changedFiles.slice(0, 60).map((file) => `- ${file}`),
       context.changedFiles.length > 60 ? `- …and ${context.changedFiles.length - 60} more` : '',
+    );
+  }
+  if (context.projectFiles && context.projectFiles.length > 0) {
+    lines.push(
+      '',
+      '## Files already in this project',
+      ...context.projectFiles.slice(0, 80).map((file) => `- ${file}`),
+      context.projectFiles.length > 80 ? `- …and ${context.projectFiles.length - 80} more` : '',
     );
   }
   if (context.notes && context.notes.length > 0) {
@@ -479,7 +496,17 @@ export interface RelayOptions extends Omit<RunTurnOptions, 'prompt' | 'coder' | 
   maxHandoffs?: number;
   /** Summarise what an agent did, for the next one's brief. */
   summarise?: (result: TurnResult) => string;
+  /**
+   * Called after every turn, with the history as it now stands.
+   *
+   * The caller uses this to write the handoff down somewhere durable, so a
+   * reboot in the middle of the night resumes with what the first two agents
+   * did instead of starting the task from nothing.
+   */
+  onTurn?: (turn: TurnResult, history: HandoffEntry[]) => void | Promise<void>;
 }
+
+export type HandoffEntry = HandoffContext['history'][number];
 
 export interface RelayResult {
   ok: boolean;
@@ -528,7 +555,11 @@ export async function relayTask(options: RelayOptions): Promise<RelayResult> {
     });
     turns.push(result);
 
-    if (result.ok) return { ok: true, turns };
+    if (result.ok) {
+      history.push({ coder: result.coder, summary: summarise(result), at: pool.now() });
+      await options.onTurn?.(result, history);
+      return { ok: true, turns };
+    }
 
     // Carry forward what it managed before it stopped, so the next agent does
     // not repeat it.
@@ -543,6 +574,7 @@ export async function relayTask(options: RelayOptions): Promise<RelayResult> {
       });
     }
     context.lastOutputTail = result.output;
+    await options.onTurn?.(result, history);
   }
 
   return { ok: false, turns, reason: `no agent finished the task after ${maxHandoffs} handoffs` };

@@ -1,0 +1,30 @@
+{
+  "name": "@megaai/node",
+  "version": "0.1.0",
+  "description": "The MegaAI agent for your own machine — joins the mesh, works while you are away, drives your coding CLIs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "bin": {
+    "megaai-node": "./dist/index.js"
+  },
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "@megaai/coders": "0.1.0",
+    "@megaai/mesh": "0.1.0",
+    "@megaai/node-agent": "0.1.0",
+    "@megaai/types": "0.1.0",
+    "@megaai/utils": "0.1.0"
+  },
+  "optionalDependencies": {
+    "mongodb": "^6.10.0"
+  },
+  "license": "MIT"
+}
