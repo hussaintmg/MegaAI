@@ -13,6 +13,7 @@ import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } f
 import { MegaError } from '@megaai/types';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
+import { KeyRing, collectKeys } from '../keyring.js';
 
 export interface AnthropicProviderOptions {
   apiKey?: string;
@@ -28,10 +29,13 @@ export class AnthropicProvider implements Provider {
   readonly kind: ProviderKind = 'anthropic';
   readonly name = 'Anthropic (Claude)';
   private readonly options: AnthropicProviderOptions;
-  private client?: Anthropic;
+  /** One client per key — the SDK binds the key at construction. */
+  private readonly clients = new Map<number, Anthropic>();
+  readonly keys: KeyRing;
 
   constructor(options: AnthropicProviderOptions = {}) {
     this.options = options;
+    this.keys = new KeyRing(collectKeys(options));
   }
 
   models(): ModelCard[] {
@@ -39,21 +43,53 @@ export class AnthropicProvider implements Provider {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.options.apiKey);
+    return this.keys.size > 0;
   }
 
-  private getClient(): Anthropic {
-    if (!this.client) {
-      if (!this.options.apiKey) {
-        throw new MegaError('PROVIDER_UNAVAILABLE', 'Anthropic provider has no API key configured');
-      }
-      this.client = new Anthropic({ apiKey: this.options.apiKey, baseURL: this.options.baseURL });
+  private clientFor(index: number, apiKey: string): Anthropic {
+    let client = this.clients.get(index);
+    if (!client) {
+      client = new Anthropic({ apiKey, baseURL: this.options.baseURL });
+      this.clients.set(index, client);
     }
-    return this.client;
+    return client;
   }
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    const client = this.getClient();
+    if (this.keys.size === 0) {
+      throw new MegaError('PROVIDER_UNAVAILABLE', 'Anthropic provider has no API key configured');
+    }
+    for (;;) {
+      const active = this.keys.current();
+      if (!active) {
+        const readyAt = this.keys.readyAt();
+        throw new MegaError('RATE_LIMITED', `Anthropic: ${this.keys.explain()}`, {
+          ...(readyAt ? { retryAfterMs: Math.max(0, readyAt - Date.now()) } : {}),
+        });
+      }
+      try {
+        return await this.attempt(request, this.clientFor(active.index, active.key));
+      } catch (error) {
+        if (!(error instanceof MegaError)) throw error;
+        const retryAfterMs = typeof error.details['retryAfterMs'] === 'number' ? error.details['retryAfterMs'] : undefined;
+        if (error.code === 'RATE_LIMITED') {
+          this.keys.park(active.index, error.message, retryAfterMs ? Date.now() + retryAfterMs : undefined);
+        } else if (error.code === 'PERMISSION_DENIED') {
+          this.keys.reject(active.index, error.message);
+        } else {
+          throw error;
+        }
+        if (!this.keys.hasAnother(active.index)) {
+          const readyAt = this.keys.readyAt();
+          throw new MegaError(error.code, `Anthropic: ${this.keys.explain()}`, {
+            ...(readyAt ? { retryAfterMs: Math.max(0, readyAt - Date.now()) } : {}),
+          });
+        }
+      }
+    }
+  }
+
+  private async attempt(request: CompletionRequest, client: Anthropic): Promise<CompletionResponse> {
     const model = request.model ?? this.options.model ?? DEFAULT_MODEL;
 
     // Fold any system-role chat messages into the top-level system prompt;
@@ -103,7 +139,9 @@ export class AnthropicProvider implements Provider {
         throw new MegaError('RATE_LIMITED', `Anthropic rate limited: ${err.message}`);
       }
       if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
-        throw new MegaError('PROVIDER_UNAVAILABLE', `Anthropic auth failed: ${err.message}`);
+        // A key problem, not a provider problem — one bad key must not take
+        // Anthropic down when others are configured.
+        throw new MegaError('PERMISSION_DENIED', `Anthropic rejected this key: ${err.message}`);
       }
       if (err instanceof Anthropic.APIConnectionError) {
         throw new MegaError('PROVIDER_UNAVAILABLE', `Anthropic unreachable: ${err.message}`);

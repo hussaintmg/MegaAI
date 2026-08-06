@@ -7,11 +7,14 @@
 import type { CompletionRequest, CompletionResponse, ModelCard, ProviderKind } from '@megaai/types';
 import { MegaError } from '@megaai/types';
 import { retryAfterFrom } from '../retry-after.js';
+import { KeyRing, collectKeys } from '../keyring.js';
 import type { Provider } from '@megaai/contracts';
 import { BUILTIN_MODELS } from '../models.js';
 
 export interface OpenAICompatOptions {
   apiKey?: string;
+  /** Several keys, tried one after another before the provider gives up. */
+  apiKeys?: string[];
   model?: string;
   baseURL?: string;
   maxTokens?: number;
@@ -30,10 +33,13 @@ export class OpenAICompatProvider implements Provider {
   readonly name: string;
   private readonly options: OpenAICompatOptions;
 
+  readonly keys: KeyRing;
+
   constructor(options: OpenAICompatOptions = {}) {
     this.options = options;
     this.kind = options.kind ?? 'openai';
     this.name = options.name ?? 'OpenAI-compatible endpoint';
+    this.keys = new KeyRing(collectKeys(options));
   }
 
   models(): ModelCard[] {
@@ -41,13 +47,44 @@ export class OpenAICompatProvider implements Provider {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.options.apiKey);
+    return this.keys.size > 0;
   }
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    if (!this.options.apiKey) {
+    if (this.keys.size === 0) {
       throw new MegaError('PROVIDER_UNAVAILABLE', `${this.name} has no API key configured`);
     }
+    for (;;) {
+      const active = this.keys.current();
+      if (!active) {
+        const readyAt = this.keys.readyAt();
+        throw new MegaError('RATE_LIMITED', `${this.name}: ${this.keys.explain()}`, {
+          ...(readyAt ? { retryAfterMs: Math.max(0, readyAt - Date.now()) } : {}),
+        });
+      }
+      try {
+        return await this.attempt(request, active.key);
+      } catch (error) {
+        if (!(error instanceof MegaError)) throw error;
+        const retryAfterMs = typeof error.details['retryAfterMs'] === 'number' ? error.details['retryAfterMs'] : undefined;
+        if (error.code === 'RATE_LIMITED') {
+          this.keys.park(active.index, error.message, retryAfterMs ? Date.now() + retryAfterMs : undefined);
+        } else if (error.code === 'PERMISSION_DENIED') {
+          this.keys.reject(active.index, error.message);
+        } else {
+          throw error;
+        }
+        if (!this.keys.hasAnother(active.index)) {
+          const readyAt = this.keys.readyAt();
+          throw new MegaError(error.code, `${this.name}: ${this.keys.explain()}`, {
+            ...(readyAt ? { retryAfterMs: Math.max(0, readyAt - Date.now()) } : {}),
+          });
+        }
+      }
+    }
+  }
+
+  private async attempt(request: CompletionRequest, apiKey: string): Promise<CompletionResponse> {
     const model = request.model ?? this.options.model ?? 'gpt-5';
     const url = `${this.options.baseURL ?? 'https://api.openai.com'}/v1/chat/completions`;
     const messages = [
@@ -61,7 +98,7 @@ export class OpenAICompatProvider implements Provider {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${this.options.apiKey}`,
+          authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model,
@@ -83,7 +120,9 @@ export class OpenAICompatProvider implements Provider {
       );
     }
     if (response.status === 401 || response.status === 403) {
-      throw new MegaError('PROVIDER_UNAVAILABLE', `${this.name} auth failed (${response.status})`);
+      // Named as a key problem, not a provider problem: with several keys
+      // configured, one bad paste must not take the whole provider down.
+      throw new MegaError('PERMISSION_DENIED', `${this.name} rejected this key (${response.status})`);
     }
     if (!response.ok) {
       const body = await response.text().catch(() => '');

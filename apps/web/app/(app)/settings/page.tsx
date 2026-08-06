@@ -12,10 +12,18 @@ const LABELS: Record<string, string> = {
   groq: 'Groq',
 };
 
+interface ProviderKeyView {
+  id: string;
+  label: string;
+  addedAt: number;
+}
+
 interface ProviderView {
   enabled: boolean;
   model: string;
-  apiKey: string;
+  /** Every key saved for this provider — the engine uses all of them. */
+  keys: ProviderKeyView[];
+  keyCount: number;
   requestsPerMinute: number;
   configured: boolean;
   inChain: boolean;
@@ -32,6 +40,8 @@ interface SettingsView {
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [keys, setKeys] = useState<Record<string, string>>({});
+  /** Keys marked for removal on the next save, so it can be undone first. */
+  const [removing, setRemoving] = useState<Record<string, string[]>>({});
   const [emailKey, setEmailKey] = useState('');
   const [vercelToken, setVercelToken] = useState('');
   const [fallback, setFallback] = useState('');
@@ -60,6 +70,7 @@ export default function SettingsPage() {
       setSettings(data.settings);
       setFallback(data.settings.fallbackChain.join(', '));
       setKeys({});
+      setRemoving({});
       setEmailKey('');
       setVercelToken('');
       setLoadError('');
@@ -98,10 +109,14 @@ export default function SettingsPage() {
     try {
       const providers: Record<string, unknown> = {};
       for (const kind of KINDS) {
+        // A typed key is *added* to the list rather than replacing it — that is
+        // the whole point of holding several.
+        const typed = (keys[kind] ?? '').trim();
         providers[kind] = {
           enabled: settings.providers[kind]?.enabled ?? true,
           model: settings.providers[kind]?.model ?? '',
-          apiKey: keys[kind] ?? '',
+          addKeys: typed ? [typed] : [],
+          removeKeyIds: removing[kind] ?? [],
           requestsPerMinute: settings.providers[kind]?.requestsPerMinute ?? 0,
         };
       }
@@ -134,7 +149,9 @@ export default function SettingsPage() {
         <h2>AI providers</h2>
         <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
           Keys are encrypted (AES-256) before they reach the database and only decrypted for your own GitHub
-          Actions runner. Leave a key blank to keep the stored one.
+          Actions runner. <strong>Add as many keys per provider as you like</strong> — free tiers are counted
+          per key, so three Gemini keys is three times the allowance, and a key that hits its limit costs a
+          key rather than the whole provider: the next one takes over inside the same request.
         </div>
         <div className="provider-row" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="muted" style={{ fontSize: 11 }}>PROVIDER</div>
@@ -149,7 +166,9 @@ export default function SettingsPage() {
             <div className="provider-row" key={kind}>
               <div>
                 <strong>{LABELS[kind]}</strong>
-                <div className={`status ${p?.configured ? 'set' : 'unset'}`}>{p?.configured ? 'configured' : 'no key'}</div>
+                <div className={`status ${p?.configured ? 'set' : 'unset'}`}>
+                  {p?.keyCount ? `${p.keyCount} key${p.keyCount === 1 ? '' : 's'}` : 'no key'}
+                </div>
                 {p?.configured && !p.inChain && (
                   <div className="status" style={{ color: 'var(--err)' }}>not in fallback order</div>
                 )}
@@ -163,12 +182,37 @@ export default function SettingsPage() {
                 placeholder="default"
                 onChange={(e) => setProvider(kind, { model: e.target.value })}
               />
-              <input
-                type="password"
-                value={keys[kind] ?? ''}
-                placeholder={p?.apiKey || 'not set'}
-                onChange={(e) => setKeys((prev) => ({ ...prev, [kind]: e.target.value }))}
-              />
+              <div>
+                {(p?.keys ?? []).map((key) => (
+                  <div key={key.id} className="keychip">
+                    <span>{key.label}</span>
+                    <button
+                      type="button"
+                      title="remove this key"
+                      className={removing[kind]?.includes(key.id) ? 'removing' : ''}
+                      onClick={() =>
+                        setRemoving((prev) => {
+                          const already = prev[kind] ?? [];
+                          return {
+                            ...prev,
+                            [kind]: already.includes(key.id)
+                              ? already.filter((id) => id !== key.id)
+                              : [...already, key.id],
+                          };
+                        })
+                      }
+                    >
+                      {removing[kind]?.includes(key.id) ? 'undo' : '×'}
+                    </button>
+                  </div>
+                ))}
+                <input
+                  type="password"
+                  value={keys[kind] ?? ''}
+                  placeholder={p?.keyCount ? 'add another key' : 'paste a key'}
+                  onChange={(e) => setKeys((prev) => ({ ...prev, [kind]: e.target.value }))}
+                />
+              </div>
               <input
                 type="number"
                 min={0}
@@ -186,7 +230,8 @@ export default function SettingsPage() {
           );
         })}
         <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-          A saved key is only used when its switch is on <em>and</em> it appears in the fallback order below.
+          A saved key is only used when its switch is on <em>and</em> the provider appears in the fallback
+          order below. When every key of a provider is spent, the next provider in the order takes over.
           Leave REQ/MIN blank unless you pay for a higher rate — the engine queues against it instead of
           bursting past your limit and losing the run to a 429.
         </div>

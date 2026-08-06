@@ -5,6 +5,7 @@
 
 export { BUILTIN_MODELS, ModelRegistry } from './models.js';
 export { LimitTracker, type LimitCheck } from './limits.js';
+export { KeyRing, collectKeys, labelForKey, type KeyState, type KeyRingOptions } from './keyring.js';
 export {
   AiSessionManager,
   ProviderRegistry,

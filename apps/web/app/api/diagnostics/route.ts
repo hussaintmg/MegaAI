@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { githubConfig, refNote, resolveRef } from '@/lib/github';
-import { loadSettingsDoc, PROVIDER_KINDS } from '@/lib/settings';
+import { loadSettingsDoc, providerKeys, PROVIDER_KINDS } from '@/lib/settings';
 import { decryptSecret } from '@/lib/crypto';
 import { probeProvider } from '@/lib/probe';
 
@@ -97,7 +97,7 @@ export async function GET() {
   // is the difference between a real delivery and placeholder scaffolding.
   try {
     const settings = await loadSettingsDoc();
-    const stored = PROVIDER_KINDS.filter((kind) => settings.providers[kind]?.apiKeyEnc);
+    const stored = PROVIDER_KINDS.filter((kind) => providerKeys(settings.providers[kind]).length > 0);
 
     // A saved key does nothing on its own: it also has to be switched on and
     // present in the fallback order. Both are silent when wrong — the run just
@@ -142,9 +142,13 @@ export async function GET() {
       });
     } else {
       const probes = await Promise.all(
-        configured.map((kind) =>
-          probeProvider(kind, decryptSecret(settings.providers[kind]!.apiKeyEnc), settings.providers[kind]!.model),
-        ),
+        configured.map((kind) => {
+          // Probe the first key: if that one answers, the provider is reachable
+          // and correctly configured. Probing every key would burn one request
+          // of each key's allowance on every diagnostics run.
+          const first = providerKeys(settings.providers[kind])[0];
+          return probeProvider(kind, decryptSecret(first?.apiKeyEnc ?? ''), settings.providers[kind]!.model);
+        }),
       );
       for (const probe of probes) {
         checks.push({ name: `Provider: ${probe.kind}`, ok: probe.ok, detail: probe.detail });

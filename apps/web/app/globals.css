@@ -134,3 +134,29 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
   .delivery { grid-template-columns: 1fr; }
   .filelist { max-height: 200px; }
 }
+
+/* A saved API key, shown as its last four characters and never more. */
+.keychip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px 6px 0;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--panel);
+}
+.keychip button {
+  all: unset;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.keychip button:hover { color: var(--err); }
+/* Marked for removal: struck through until you save, so it can be undone. */
+.keychip:has(button.removing) { opacity: 0.55; text-decoration: line-through; }
+.keychip button.removing { color: var(--err); text-decoration: none; }

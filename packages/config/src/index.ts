@@ -14,6 +14,14 @@ import { deepMerge, isPlainObject } from '@megaai/utils';
 export interface ProviderConfig {
   enabled: boolean;
   apiKey?: string;
+  /**
+   * More keys for the same provider, all used.
+   *
+   * Free tiers are per key, so three Gemini keys is three times the
+   * allowance — but only if a spent key costs a key rather than the whole
+   * provider. The provider rotates through these before reporting a limit.
+   */
+  apiKeys?: string[];
   /** Preferred default model id for this provider. */
   model?: string;
   requestsPerMinute?: number;

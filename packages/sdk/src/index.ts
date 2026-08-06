@@ -163,6 +163,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
     providers.register(
       new AnthropicProvider({
         apiKey: anthropicConfig.apiKey,
+        ...(anthropicConfig.apiKeys ? { apiKeys: anthropicConfig.apiKeys } : {}),
         model: anthropicConfig.model,
         maxTokens: config.ai.maxTokens,
       }),
@@ -170,11 +171,23 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
   }
   const openaiConfig = providerConfigs.openai;
   if (openaiConfig?.enabled) {
-    providers.register(new OpenAICompatProvider({ apiKey: openaiConfig.apiKey, model: openaiConfig.model }));
+    providers.register(
+      new OpenAICompatProvider({
+        apiKey: openaiConfig.apiKey,
+        ...(openaiConfig.apiKeys ? { apiKeys: openaiConfig.apiKeys } : {}),
+        model: openaiConfig.model,
+      }),
+    );
   }
   const geminiConfig = providerConfigs.gemini;
   if (geminiConfig?.enabled) {
-    providers.register(new GeminiProvider({ apiKey: geminiConfig.apiKey, model: geminiConfig.model }));
+    providers.register(
+      new GeminiProvider({
+        apiKey: geminiConfig.apiKey,
+        ...(geminiConfig.apiKeys ? { apiKeys: geminiConfig.apiKeys } : {}),
+        model: geminiConfig.model,
+      }),
+    );
   }
   // OpenRouter and Groq both speak the OpenAI chat-completions wire protocol,
   // so they reuse the OpenAI-compatible adapter with their own base URL + kind.
@@ -185,6 +198,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
         kind: 'openrouter',
         name: 'OpenRouter',
         apiKey: openrouterConfig.apiKey,
+        ...(openrouterConfig.apiKeys ? { apiKeys: openrouterConfig.apiKeys } : {}),
         model: openrouterConfig.model ?? 'openai/gpt-4o-mini',
         baseURL: 'https://openrouter.ai/api',
       }),
@@ -197,6 +211,7 @@ export function createMegaAI(options: MegaAIOptions = {}): MegaAI {
         kind: 'groq',
         name: 'Groq',
         apiKey: groqConfig.apiKey,
+        ...(groqConfig.apiKeys ? { apiKeys: groqConfig.apiKeys } : {}),
         model: groqConfig.model ?? 'llama-3.3-70b-versatile',
         baseURL: 'https://api.groq.com/openai',
       }),
