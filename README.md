@@ -305,7 +305,9 @@ handing the work on with full context each time one runs out of quota, and
 parking it until the earliest reset when they all do. See
 [docs/LAPTOP-AGENT.md](./docs/LAPTOP-AGENT.md) to set it up, and
 [docs/DISTRIBUTED-PLAN.md](./docs/DISTRIBUTED-PLAN.md) for where it is going
-(the phone node, live logs in the dashboard, voice and image input).
+(the phone node, WhatsApp from the laptop's own Chrome, voice and image input).
+The dashboard shows every machine and the shared queue live, and can hand out
+work of any kind from a phone.
 
 **39 workspaces (35 packages + 4 apps) · 312 tests · fully offline demo.**
 

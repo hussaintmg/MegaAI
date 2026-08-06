@@ -160,3 +160,56 @@ pre.report { background: #0d1220; border: 1px solid var(--border); border-radius
 /* Marked for removal: struck through until you save, so it can be undone. */
 .keychip:has(button.removing) { opacity: 0.55; text-decoration: line-through; }
 .keychip button.removing { color: var(--err); text-decoration: none; }
+
+/* ---------------- Machines: live nodes and the shared queue ---------------- */
+
+.page-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.livedot { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.livedot.on { color: var(--ok); }
+.livedot.off { color: var(--muted); }
+
+.nodegrid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.nodecard { border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: grid; gap: 4px; }
+.nodecard.offline { opacity: 0.55; }
+.nodecard-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.pill.gear-full { color: var(--ok); border-color: var(--ok); }
+.pill.gear-background { color: #e2b93b; border-color: #e2b93b; }
+.pill.gear-stop, .pill.gear-off { color: var(--muted); }
+.pill.state-running, .pill.state-claimed { color: var(--ok); border-color: var(--ok); }
+.pill.state-failed { color: var(--err); border-color: var(--err); }
+.pill.state-cancelled, .pill.state-completed { color: var(--muted); }
+
+.kindrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.kindbtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.kindbtn.on { border-color: var(--accent, var(--ok)); color: var(--accent, var(--ok)); }
+.checkrow { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.checkrow input { width: auto; }
+
+.taskrow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.taskrow:last-child { border-bottom: none; }
+.taskrow-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.taskrow.state-completed, .taskrow.state-cancelled { opacity: 0.6; }
+/* The reason a task is waiting is the most useful line on the page at 7am. */
+.waiting { font-size: 13px; color: #e2b93b; }
+.error-line { font-size: 13px; color: var(--err); word-break: break-word; }
+button.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 12px; padding: 4px 10px; }
+button.ghost:hover { color: var(--err); border-color: var(--err); }
+
+/* On a phone this is the screen you actually read, so it gets the room. */
+@media (max-width: 640px) {
+  .nodegrid { grid-template-columns: 1fr; }
+  .taskrow { flex-direction: column; align-items: stretch; gap: 6px; }
+  .taskrow button.ghost { align-self: flex-start; }
+  .kindbtn { flex: 1 1 auto; }
+}

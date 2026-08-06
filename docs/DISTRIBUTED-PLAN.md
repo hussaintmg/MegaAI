@@ -191,7 +191,8 @@ one being finished.
 | **1** ✅ | **Mesh core** — node registry, heartbeats, durable task queue with leases, capability routing, MongoDB store with change streams (polling fallback), local file store | See every node's status live; queue a task with the laptop off and watch it run when the laptop wakes | done |
 | **2** ✅ | **Laptop agent** — autostart, resource guard, three gears, crash-resume, per-project locking | Close the lid mid-task and have it continue after reboot; watch it back off while you work — see [LAPTOP-AGENT.md](./LAPTOP-AGENT.md) | done |
 | **3** ✅ | **Coder relay** — drive Claude Code / Codex / OpenCode, track quota, hand off with context, resume at reset | Leave it overnight and find work done by three agents in turn, not one that stopped at midnight | done |
-| **3a** | **The rest of phase 1–3** — SSE to the browser, the dashboard's live node/queue view, local Chrome control for WhatsApp | Watch it work from the phone | ~1 week |
+| **3a** ✅ | **The dashboard** — live node/queue view over SSE, queue any kind of task from the browser or a phone, cancel, mobile layout | Watch it work from the phone, and give it work from there | done |
+| **3c** | **Local Chrome control** — WhatsApp from the laptop's own browser session | "Send this to the client" from the phone | ~1 week |
 | **3b** | **Multi-turn agents + fleet** — the propose→verify→correct loop, and the specialist agents above | Get code that compiles because the agent saw the error | ~2 weeks |
 | **4** | **Phone node** — PWA for control and live logs; Termux agent for phone-only work (SMS, WhatsApp, camera) | Say "email this to the client" from your phone and have it happen | ~1 week |
 | **5** | **Full delivery** — repo creation, push, Vercel deploy, then open the live URL and verify it really works | One sentence in, a live verified URL out | ~1 week |

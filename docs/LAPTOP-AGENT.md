@@ -180,3 +180,18 @@ to leave it working overnight on one laptop. Point it at MongoDB and the same
 queue is shared with the phone and the cloud, pushed over a change stream
 rather than polled — and if the database cannot do change streams, it falls
 back to polling **and says so** rather than going quiet.
+
+---
+
+## Watching it from anywhere
+
+Set `MEGAAI_MONGODB_URI` to the same connection string the website uses, and
+the **Machines** page shows this laptop live: its gear and why, its CPU,
+memory, temperature and battery, what it is running, and every task in the
+queue with the reason anything is waiting. It is pushed over Server-Sent
+Events, so a phone that locks its screen picks the stream back up by itself.
+
+The same page queues work — coding, a command, something that needs the mouse
+and screen, a WhatsApp, an email — which is how you hand the laptop a job from
+your phone. Anything needing the screen is marked as such when you queue it and
+waits until you step away, unless you tick *do it now*.
