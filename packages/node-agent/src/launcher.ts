@@ -202,15 +202,31 @@ export function createProcessLauncher(options: ProcessLauncherOptions = {}): Cod
       });
       if (plan.note) options.onNote?.(plan.note);
       const file = plan.file;
-      const child = spawnProcess(file, plan.args, {
-        cwd,
-        // detached gives us a process group to kill on POSIX; on Windows the
-        // group comes from taskkill /T instead, and detaching only hurts.
-        detached: platform !== 'win32',
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...options.env },
-      });
+
+      // `spawn` can throw *synchronously* — EINVAL for a .bat or .cmd is
+      // exactly that. Letting it escape skips every handoff and retry below,
+      // so "this machine cannot start the agent" arrives looking like "the
+      // task failed", which is what eight identical failures looked like on a
+      // real laptop.
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawnProcess(file, plan.args, {
+          cwd,
+          // detached gives us a process group to kill on POSIX; on Windows the
+          // group comes from taskkill /T instead, and detaching only hurts.
+          detached: platform !== 'win32',
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...options.env },
+        });
+      } catch (error) {
+        const why = (error as NodeJS.ErrnoException).code === 'EINVAL' && /\.(cmd|bat)$/i.test(file)
+          ? `${file} is a batch file, and Node refuses to run one without a shell (the fix for CVE-2024-27980). ` +
+            'MegaAI normally unwraps the shim into node + script; that this one could not be unwrapped is the bug to report.'
+          : `${(error as Error).message}`;
+        resolveOutcome({ exitCode: 127, output: `[megaai] could not start ${file}: ${why}` });
+        return;
+      }
 
       let output = '';
       let settled = false;

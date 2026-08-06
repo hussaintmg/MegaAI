@@ -65,9 +65,17 @@ For a whole new project rather than one task, there is a prompt to paste into
 Claude Code on the laptop that sets the folder up and queues the work in the
 right order: [NEW-PROJECT-PROMPT.md](./NEW-PROJECT-PROMPT.md).
 
-`tasks` lists everything in the queue with its id and, for anything still
-waiting, the reason it is waiting. `cancel <id or part of the title>` takes one
-off — including one a machine is part-way through.
+`tasks` lists everything in the queue with its id, the reason anything pending
+is waiting, and — for anything that failed — the error and how many attempts it
+took before giving up. `cancel <id or part of the title>` takes one off,
+including one a machine is part-way through.
+
+A failed task is not retried on its own: three attempts at something genuinely
+broken is enough, and an endless loop is worse than a stop. When the machine
+was at fault rather than the work, `retry <id>` or `retry --all` puts it back
+exactly as it was, carrying its checkpoint so a coder handoff resumes instead
+of starting over. The failed one stays on the record — rewriting history to
+hide it would be a lie about the night.
 
 ### If `install` fails
 

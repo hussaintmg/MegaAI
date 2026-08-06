@@ -6,6 +6,7 @@
  *   megaai-node status                 what it can see right now
  *   megaai-node tasks                  everything in the queue, with ids
  *   megaai-node add "<task>" --project <dir> [--goal "<goal>"] [--interactive] [--urgent]
+ *   megaai-node retry <id|title>|--all queue a failed task again, as it was
  *   megaai-node cancel <id|title>      take one off the queue
  *   megaai-node set KEY VALUE          remember a setting across restarts
  *   megaai-node install [--dry-run]    make it start by itself at logon
@@ -424,7 +425,7 @@ async function tasks(config: NodeConfig): Promise<void> {
   if (failed.length > 0) {
     say();
     say(yellow(`${failed.length} task(s) failed. Their errors are above — that is what to fix.`));
-    say(dim('Run one again by queueing it afresh; a failed task is not retried on its own.'));
+    say(dim('Put them back with: megaai-node retry --all  (or retry <id> for one)'));
   }
   say();
   say(dim('Remove one with: megaai-node cancel <id or part of the title>'));
@@ -468,6 +469,54 @@ async function cancel(config: NodeConfig, args: string[]): Promise<void> {
  * shell at all — so the one place people naturally put it is the one place it
  * cannot be read from.
  */
+/**
+ * Queue a failed task again, exactly as it was.
+ *
+ * A failed task is deliberately not retried on its own — three attempts at
+ * something genuinely broken is enough, and an endless loop is worse than a
+ * stop. But when the *machine* was at fault rather than the work, re-typing
+ * eight two-thousand-character briefs by hand is not a reasonable thing to ask
+ * of anyone, and copying them back out of a JSON file by hand is worse.
+ */
+async function retry(config: NodeConfig, args: string[]): Promise<void> {
+  const all = args.includes('--all');
+  const needle = args.find((entry) => !entry.startsWith('--'));
+  if (!all && !needle) {
+    say(red('Usage: megaai-node retry <id or part of the title>   |   megaai-node retry --all'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const { store, close } = await openStore(config);
+  const mesh = new Mesh({ store });
+  const failed = (await store.listTasks()).filter((task) => task.state === 'failed');
+  const chosen = all ? failed : failed.filter((task) => task.id.startsWith(needle!) || task.title.includes(needle!));
+
+  if (chosen.length === 0) {
+    say(yellow(all ? 'Nothing has failed.' : `No failed task matches "${needle}".`));
+    process.exitCode = 1;
+  } else {
+    for (const task of chosen) {
+      // A fresh task rather than a reset one: the old attempt is part of what
+      // happened, and rewriting history to hide it would be a lie about the
+      // night. The checkpoint travels, so a coder handoff resumes rather than
+      // starting the work again.
+      const queued = await mesh.enqueue({
+        title: task.title,
+        payload: task.payload,
+        requires: task.requires,
+        interactive: task.interactive,
+        urgent: task.urgent,
+      });
+      if (task.checkpoint) await store.putTask({ ...queued, checkpoint: task.checkpoint });
+      say(`${green('Queued again')} ${dim(queued.id)}  ${task.title.slice(0, 70)}${task.title.length > 70 ? '…' : ''}`);
+    }
+    say();
+    say(dim(`${chosen.length} task(s) back on the queue. Run "megaai-node run" and leave the machine.`));
+  }
+  await close();
+}
+
 function setSetting(config: NodeConfig, args: string[]): void {
   const file = envFilePath(config.stateDir);
   const [key, ...rest] = args;
@@ -642,6 +691,9 @@ async function main(): Promise<void> {
     case 'cancel':
       await cancel(config, args);
       break;
+    case 'retry':
+      await retry(config, args);
+      break;
     case 'set':
       setSetting(config, args);
       break;
@@ -653,7 +705,7 @@ async function main(): Promise<void> {
       break;
     default:
       say(`Unknown command "${command}".`);
-      say('Try: run · status · tasks · add · cancel · set · install · uninstall');
+      say('Try: run · status · tasks · add · retry · cancel · set · install · uninstall');
       process.exitCode = 1;
   }
 }
